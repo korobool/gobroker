@@ -2,7 +2,7 @@ package main
 
 import (
 	//"fmt"
-	"errors"
+	// "errors"
 	zmq "github.com/pebbe/zmq4"
 	"time"
 )
@@ -12,18 +12,21 @@ const (
 )
 
 type Dispatcher struct {
-	zmqScoket *zmq.Socket
+	zmqSocket *zmq.Socket
 	zmqPoller *zmq.Poller
 }
 
 func NewDispatcher(uri string) (*Dispatcher, error) {
 
-	if zmqSocket, err := zmq.NewSocket(zmq.ROUTER); err != nil {
+	zmqSocket, err := zmq.NewSocket(zmq.ROUTER)
+	if err != nil {
 		return nil, err
 	}
-	if err = zmqSocket.Bind(uri); err != nil {
+
+	if err := zmqSocket.Bind(uri); err != nil {
 		return nil, err
 	}
+
 	zmqPoller := zmq.NewPoller()
 	zmqPoller.Add(zmqSocket, zmq.POLLIN)
 
@@ -31,14 +34,15 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 		zmqSocket: zmqSocket,
 		zmqPoller: zmqPoller,
 	}
-	return dispacther, err
+	return dispatcher, err
 }
 
-func (d *Dispatcher) ZmqLoopRun() error {
-	for {
-		sockets, err := d.zmqPoller.Poll(POLL_INTERVAL)
-		if err != nil {
-			break //  Interrupted
-		}
-	}
-}
+// func (d *Dispatcher) ZmqLoopRun() error {
+// 	for {
+// 		sockets, err := d.zmqPoller.Poll(POLL_INTERVAL)
+// 		if err != nil {
+// 			break //  Interrupted
+// 		}
+// 	}
+// 	return nil
+// }
