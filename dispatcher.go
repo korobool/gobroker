@@ -2,8 +2,13 @@ package main
 
 import (
 	//"fmt"
-	"error"
+	"errors"
 	zmq "github.com/pebbe/zmq4"
+	"time"
+)
+
+const (
+	POLL_INTERVAL = 1000 * time.Millisecond
 )
 
 type Dispatcher struct {
@@ -12,8 +17,6 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(uri string) (*Dispatcher, error) {
-
-	var dispatcher Dispatcher
 
 	if zmqSocket, err := zmq.NewSocket(zmq.ROUTER); err != nil {
 		return nil, err
@@ -24,8 +27,18 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	zmqPoller := zmq.NewPoller()
 	zmqPoller.Add(zmqSocket, zmq.POLLIN)
 
-	dispacther.zmqScoket = zmqScoket
-	dispacther.zmqPoller = zmqPoller
+	dispatcher := &Dispatcher{
+		zmqSocket: zmqSocket,
+		zmqPoller: zmqPoller,
+	}
+	return dispacther, err
+}
 
-	return &dispacther, err
+func (d *Dispatcher) ZmqLoopRun() error {
+	for {
+		sockets, err := d.zmqPoller.Poll(POLL_INTERVAL)
+		if err != nil {
+			break //  Interrupted
+		}
+	}
 }
