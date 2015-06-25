@@ -5,9 +5,10 @@ import (
 	"net/http"
 )
 
+var dispatcher *Dispatcher
+
 func main() {
 	router := NewRouter()
-
-	StartMicroservicesObserving()
+	dispatcher, _ = NewDispatcher("0.0.0.0:7070")
 	log.Fatal(http.ListenAndServe(":8080", router))
 }

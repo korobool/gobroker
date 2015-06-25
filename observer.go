@@ -18,6 +18,8 @@ func StartMicroservicesObserving() {
 
 func remoteCall(apiMsg *ApiMessage, chResult chan string) {
 
+	go dispatcher.ExecuteMethod(apiMsg)
+
 	select {
 	case chResult <- strings.ToUpper(apiMsg.params):
 

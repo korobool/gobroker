@@ -1,8 +1,7 @@
 package main
 
 import (
-	//"fmt"
-	// "errors"
+	"fmt"
 	zmq "github.com/pebbe/zmq4"
 	"time"
 )
@@ -30,11 +29,10 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	zmqPoller := zmq.NewPoller()
 	zmqPoller.Add(zmqSocket, zmq.POLLIN)
 
-	dispatcher := &Dispatcher{
+	return &Dispatcher{
 		zmqSocket: zmqSocket,
 		zmqPoller: zmqPoller,
-	}
-	return dispatcher, err
+	}, err
 }
 
 // func (d *Dispatcher) ZmqLoopRun() error {
@@ -46,3 +44,7 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 // 	}
 // 	return nil
 // }
+
+func (d *Dispatcher) ExecuteMethod(msg *ApiMessage) {
+	fmt.Println(msg)
+}

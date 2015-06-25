@@ -44,8 +44,6 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 	case <-time.After(time.Second * 3):
 		fmt.Println("timeout")
 	}
-
-	fmt.Fprint(w, "GetDists!\n")
 }
 
 func Share(w http.ResponseWriter, r *http.Request) {
