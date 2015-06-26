@@ -41,11 +41,11 @@ type Dispatcher struct {
 	locks     Locks
 	//TODO: synchronize this map
 	//use this datastructure https://github.com/streamrail/concurrent-map
-	tasks      map[uuid.UUID]*Task
-	workerMsgs chan []string
-	workers    map[uint32]*WorkerInfo
-	methods    map[string][]uint32
-	ids        map[string][MaxWorkers]bool
+	tasks        map[uuid.UUID]*Task
+	outboundMsgs chan []string
+	workers      map[uint32]*WorkerInfo
+	methods      map[string][]uint32
+	ids          map[string][MaxWorkers]bool
 }
 
 func NewDispatcher(uri string) (*Dispatcher, error) {
@@ -63,13 +63,13 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	zmqPoller.Add(zmqSocket, zmq.POLLIN)
 
 	return &Dispatcher{
-		zmqSocket:  zmqSocket,
-		zmqPoller:  zmqPoller,
-		locks:      Locks{workers: new(sync.RWMutex)},
-		workerMsgs: make(chan []string),
-		workers:    make(map[uint32]*WorkerInfo),
-		methods:    make(map[string][]uint32),
-		ids:        map[string][MaxWorkers]bool{},
+		zmqSocket:    zmqSocket,
+		zmqPoller:    zmqPoller,
+		locks:        Locks{workers: new(sync.RWMutex)},
+		outboundMsgs: make(chan []string),
+		workers:      make(map[uint32]*WorkerInfo),
+		methods:      make(map[string][]uint32),
+		ids:          map[string][MaxWorkers]bool{},
 	}, err
 }
 
@@ -223,14 +223,19 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 }
 
 func (d *Dispatcher) ZmqWriteLoopRun() {
-	// for {
-	// 	time.Sleep(time.Second)
-	// }
-
+	for {
+		select {
+		case msg := <-d.outboundMsgs:
+			d.zmqSocket.SendMessage(msg)
+		case <-time.After(time.Second * 2):
+			fmt.Println("timeout")
+		}
+	}
 }
 
 func (d *Dispatcher) getBestWorker(methodName string) uint32 {
 
+	fmt.Println("!!!!!!!!!!!!!!!!", d, GrosDispatcher)
 	candidates := d.methods[methodName]
 	shortest := ^int(0)
 	idx := 0
@@ -272,7 +277,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 
 	strIdentity := identityIntToString(bestWorker)
 
-	d.workerMsgs <- []string{
+	d.outboundMsgs <- []string{
 		strIdentity,
 		PROTO_TASK,
 		taskUUID.String(),

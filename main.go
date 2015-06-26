@@ -6,18 +6,19 @@ import (
 	"net/http"
 )
 
-var dispatcher *Dispatcher
+var GrosDispatcher *Dispatcher
 
 func main() {
 	router := NewRouter()
-	dispatcher, err := NewDispatcher("tcp://0.0.0.0:7070")
+	GrosDispatcher, err := NewDispatcher("tcp://0.0.0.0:7070")
 	if err != nil {
 		fmt.Println(err)
 	}
+	// fmt.Println(">>>", dispatcher)
 
 	// Starting zeromq loop
-	go dispatcher.ZmqReadLoopRun()
-	go dispatcher.ZmqWriteLoopRun()
+	go GrosDispatcher.ZmqReadLoopRun()
+	go GrosDispatcher.ZmqWriteLoopRun()
 
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
