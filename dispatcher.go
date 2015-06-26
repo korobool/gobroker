@@ -234,3 +234,15 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage) {
 		fmt.Println("Dispatcher workerMsgs timeout")
 	}
 }
+
+func remoteCall(apiMsg *ApiMessage, chResult chan string) {
+
+	go dispatcher.ExecuteMethod(apiMsg)
+
+	select {
+	case chResult <- strings.ToUpper(apiMsg.params):
+
+	case <-time.After(time.Second * 2):
+		fmt.Println("timeout")
+	}
+}
