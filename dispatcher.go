@@ -168,18 +168,11 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 
 			d.addWorker(identity, msg)
 
-			//buf := make([]byte, 8)
-
 			buf := new(bytes.Buffer)
-			buf.Write(0x0)
+			buf.WriteByte(0x0)
 			err = binary.Write(buf, binary.LittleEndian, identity)
 
-			//binary.PutUvarint(buf, uint64(identity))
-			//buf = append([]byte{0x0}, buf...)
-
-			fmt.Println(buf.Bytes())
-
-			d.zmqSocket.SendMessage(string(buf.Bytes()), PROTO_KA)
+			d.zmqSocket.SendMessage(string(buf.Bytes()), PROTO_KA, string(d.workers[identity].workerId))
 
 		}
 
@@ -192,13 +185,14 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			// TODO: this is done in one-client-mode just for protocol debugging. Implement it.
 			time.Sleep(time.Second)
 
-			var buf []byte
-			binary.PutUvarint(buf, uint64(identity))
-			buf = append([]byte{0x0}, buf...)
+			buf := new(bytes.Buffer)
+			buf.WriteByte(0x0)
+			err = binary.Write(buf, binary.LittleEndian, identity)
+			if err != nil {
+				fmt.Println("Error while prapring message")
+			}
 
-			fmt.Println(string(buf))
-
-			d.zmqSocket.SendMessage(PROTO_KA, string(buf))
+			d.zmqSocket.SendMessage(string(buf.Bytes()), PROTO_KA, string(d.workers[identity].workerId))
 		}
 
 		// 	} else if len(msg) == 3 {
