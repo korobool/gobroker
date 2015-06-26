@@ -4,7 +4,7 @@ import (
 	"fmt"
 	zmq "github.com/pebbe/zmq4"
 	// "strings"
-	//"bytes"
+	"bytes"
 	"encoding/binary"
 	// "strconv"
 	"sync"
@@ -23,12 +23,12 @@ type WorkerInfo struct {
 	workerId   uint8
 	workerType string
 	tasks      []string
-	// kaFailed
-	// kaLast
+	kaFailed   int8
+	kaLast     int64
 }
 
 type Locks struct {
-	workers *sync.Mutex
+	workers *sync.RWMutex
 }
 
 type Dispatcher struct {
@@ -36,9 +36,9 @@ type Dispatcher struct {
 	zmqPoller  *zmq.Poller
 	locks      Locks
 	workerMsgs chan *WorkerMsg
-	workers    map[uint32]WorkerInfo
+	workers    map[uint32]*WorkerInfo
 	methods    map[string][]uint32
-	ids        [16]bool
+	ids        map[string][16]bool
 }
 
 func NewDispatcher(uri string) (*Dispatcher, error) {
@@ -58,10 +58,11 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	return &Dispatcher{
 		zmqSocket:  zmqSocket,
 		zmqPoller:  zmqPoller,
-		locks:      Locks{workers: new(sync.Mutex)},
+		locks:      Locks{workers: new(sync.RWMutex)},
 		workerMsgs: make(chan *WorkerMsg),
-		workers:    make(map[uint32]WorkerInfo),
+		workers:    make(map[uint32]*WorkerInfo),
 		methods:    make(map[string][]uint32),
+		ids:        map[string][16]bool{},
 	}, err
 }
 
@@ -78,10 +79,12 @@ func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
 
 	workerId := d.takeWorkerId(workerType)
 
-	d.workers[identity] = WorkerInfo{
+	d.workers[identity] = &WorkerInfo{
 		workerId:   workerId,
 		workerType: workerType,
 		tasks:      []string{},
+		kaLast:     0,
+		kaFailed:   0,
 	}
 
 	// Get methods exposed by a worker
@@ -99,20 +102,31 @@ func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
 	return nil
 }
 
-func (d *Dispatcher) deleteWorker(identity uint32) {
+func (d *Dispatcher) removeWorker(identity uint32) {
+	d.locks.workers.Lock()
+	defer d.locks.workers.Unlock()
 
 }
 
-func (d *Dispatcher) releaseWorkerId(id uint8) {
-	d.ids[id-1] = false
+func (d *Dispatcher) releaseWorkerId(id uint8, workerType string) {
+	ids := d.ids[workerType]
+	ids[id-1] = false
+	d.ids[workerType] = ids
 }
 
 func (d *Dispatcher) takeWorkerId(workerType string) uint8 {
 
 	// TODO: Take id lists from the map
-	for idx, val := range d.ids {
+	if _, ok := d.ids[workerType]; !ok {
+		d.ids[workerType] = [16]bool{}
+	}
+
+	for idx, val := range d.ids[workerType] {
+
 		if !val {
-			d.ids[idx] = true
+			ids := d.ids[workerType]
+			ids[idx] = true
+			d.ids[workerType] = ids
 			return uint8(idx + 1)
 		}
 	}
@@ -144,21 +158,49 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		identity := binary.LittleEndian.Uint32([]byte(msg[0][1:]))
 
 		fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
+		//fmt.Printf("!!!!!!!!!!!!!", d.ids)
 
 		cmd := msg[1]
 		if cmd == PROTO_READY {
 			if _, ok := d.workers[identity]; ok {
-				d.deleteWorker(identity)
+				d.removeWorker(identity)
 			}
 
 			d.addWorker(identity, msg)
 
+			//buf := make([]byte, 8)
+
+			buf := new(bytes.Buffer)
+			buf.Write(0x0)
+			err = binary.Write(buf, binary.LittleEndian, identity)
+
+			//binary.PutUvarint(buf, uint64(identity))
+			//buf = append([]byte{0x0}, buf...)
+
+			fmt.Println(buf.Bytes())
+
+			d.zmqSocket.SendMessage(string(buf.Bytes()), PROTO_KA)
+
 		}
 
-		// if len(msg) == 1 {
-		// 	if msg[0] == PROTO_KA {
-		// 		worker.SendMessage(PROTO_KA)
-		// 	}
+		// TODO: We need to ignore all the messages from workers with unnkown identity
+
+		if msg[1] == PROTO_KA {
+			d.workers[identity].kaLast = time.Now().Unix()
+			d.workers[identity].kaFailed = 0
+
+			// TODO: this is done in one-client-mode just for protocol debugging. Implement it.
+			time.Sleep(time.Second)
+
+			var buf []byte
+			binary.PutUvarint(buf, uint64(identity))
+			buf = append([]byte{0x0}, buf...)
+
+			fmt.Println(string(buf))
+
+			d.zmqSocket.SendMessage(PROTO_KA, string(buf))
+		}
+
 		// 	} else if len(msg) == 3 {
 		// 		if msg[0] == PROTO_TASK {
 		// 			ok := queue.Put(taskqueue.Task{msg[1], msg[2]})
