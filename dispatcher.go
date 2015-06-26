@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	// "strconv"
+	"github.com/m4rw3r/uuid"
 	"strings"
 	"sync"
 	"time"
@@ -28,14 +29,22 @@ type WorkerInfo struct {
 	kaLast     int64
 }
 
+type Task struct {
+	chResult       chan string
+	workerIdentity uint32
+}
+
 type Locks struct {
 	workers *sync.RWMutex
 }
 
 type Dispatcher struct {
-	zmqSocket  *zmq.Socket
-	zmqPoller  *zmq.Poller
-	locks      Locks
+	zmqSocket *zmq.Socket
+	zmqPoller *zmq.Poller
+	locks     Locks
+	//TODO: synchronize this map
+	//use this datastructure https://github.com/streamrail/concurrent-map
+	tasks      map[uuid.UUID]*Task
 	workerMsgs chan *WorkerMsg
 	workers    map[uint32]*WorkerInfo
 	methods    map[string][]uint32
@@ -215,14 +224,47 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 	return nil
 }
 
+func (d *Dispatcher) ZmqWriteLoopRun() {
+	for {
+		time.Sleep(time.Second)
+	}
+}
+
+func (d *Dispatcher) getBestWorker(method string) uint32 {
+
+	candidates := d.methods[methodName]
+	shortest := ^uint(0)
+	idx := 0
+
+	for index, candidate := range candidates {
+		if len(candidate.tasks) < shortest {
+			shortest = len(candidate.tasks)
+			idx = index
+		}
+	}
+
+	return candidates[idx]
+}
+
 func (d *Dispatcher) ExecuteMethod(msg *ApiMessage) {
 	fmt.Println("ExecuteMethod:", msg)
 
+	// TODO: validations and errors
 	// Select a worker
+	methodName := msg.method
 
-	// Generate TaskID
+	bestWorker := d.getBestWorker(methodName)
+
+	// Generate TaskID and chanel for response
+	taskUUID, _ := uuid.V4()
+	ch := make(chan string)
 
 	// add Task to d.tsasks
+	// TODO: add check if _, ok := d.tasks[taskUuid]; !ok .......
+	d.tasks[taskUUID] = &Task{
+		chResult:       ch,
+		workerIdentity: bestWorker,
+	}
 
 	// setup cahanel listener for response with timeout
 

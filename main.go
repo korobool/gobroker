@@ -17,6 +17,7 @@ func main() {
 
 	// Starting zeromq loop
 	go dispatcher.ZmqReadLoopRun()
+	go dispatcher.ZmqWriteLoopRun()
 
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
