@@ -6,15 +6,15 @@ import (
 	"time"
 )
 
-func ObserveMicroservices() {
-	for {
-		time.Sleep(time.Second)
-	}
-}
+// func ObserveMicroservices() {
+// 	for {
+// 		time.Sleep(time.Second)
+// 	}
+// }
 
-func StartMicroservicesObserving() {
-	go ObserveMicroservices()
-}
+// func StartMicroservicesObserving() {
+// 	go ObserveMicroservices()
+// }
 
 func remoteCall(apiMsg *ApiMessage, chResult chan string) {
 
