@@ -3,9 +3,8 @@ package main
 import (
 	// "encoding/json"
 	"fmt"
-	"net/http"
-
 	"github.com/gorilla/mux"
+	"net/http"
 	"time"
 )
 
@@ -33,7 +32,7 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 		params: fmt.Sprintf("{'appID': %s}", appID),
 	}
 
-	go remoteCall(&apiMsg, chResult)
+	go dispatcher.ExecuteMethod(&apiMsg, chResult)
 
 	select {
 	case result, ok := <-chResult:

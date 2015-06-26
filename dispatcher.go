@@ -1,25 +1,22 @@
 package main
 
 import (
-	"fmt"
-	zmq "github.com/pebbe/zmq4"
-	// "strings"
-	"bytes"
 	"encoding/binary"
-	// "strconv"
+	"fmt"
 	"github.com/m4rw3r/uuid"
-	"strings"
+	zmq "github.com/pebbe/zmq4"
 	"sync"
 	"time"
 )
 
 const (
-	POLL_INTERVAL = 1000 * time.Millisecond
+	MaxWorkers   = 16
+	PollInterval = 1000 * time.Millisecond
 )
 
-type WorkerMsg struct {
-	Value string
-}
+// type WorkerMsg struct {
+// 	Value string
+// }
 
 type WorkerInfo struct {
 	workerId   uint8
@@ -45,10 +42,10 @@ type Dispatcher struct {
 	//TODO: synchronize this map
 	//use this datastructure https://github.com/streamrail/concurrent-map
 	tasks      map[uuid.UUID]*Task
-	workerMsgs chan *WorkerMsg
+	workerMsgs chan []string
 	workers    map[uint32]*WorkerInfo
 	methods    map[string][]uint32
-	ids        map[string][16]bool
+	ids        map[string][MaxWorkers]bool
 }
 
 func NewDispatcher(uri string) (*Dispatcher, error) {
@@ -69,15 +66,11 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 		zmqSocket:  zmqSocket,
 		zmqPoller:  zmqPoller,
 		locks:      Locks{workers: new(sync.RWMutex)},
-		workerMsgs: make(chan *WorkerMsg),
+		workerMsgs: make(chan []string),
 		workers:    make(map[uint32]*WorkerInfo),
 		methods:    make(map[string][]uint32),
-		ids:        map[string][16]bool{},
+		ids:        map[string][MaxWorkers]bool{},
 	}, err
-}
-
-func (d *Dispatcher) ZmqWriteLoopRun() error {
-	return nil
 }
 
 func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
@@ -128,7 +121,7 @@ func (d *Dispatcher) takeWorkerId(workerType string) uint8 {
 
 	// TODO: Take id lists from the map
 	if _, ok := d.ids[workerType]; !ok {
-		d.ids[workerType] = [16]bool{}
+		d.ids[workerType] = [MaxWorkers]bool{}
 	}
 
 	for idx, val := range d.ids[workerType] {
@@ -147,7 +140,7 @@ func (d *Dispatcher) takeWorkerId(workerType string) uint8 {
 func (d *Dispatcher) ZmqReadLoopRun() error {
 	for {
 
-		sockets, err := d.zmqPoller.Poll(POLL_INTERVAL)
+		sockets, err := d.zmqPoller.Poll(PollInterval)
 		if err != nil {
 			fmt.Println(sockets)
 			break //  Interrupted
@@ -178,11 +171,13 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 
 			d.addWorker(identity, msg)
 
-			buf := new(bytes.Buffer)
-			buf.WriteByte(0x0)
-			err = binary.Write(buf, binary.LittleEndian, identity)
+			// buf := new(bytes.Buffer)
+			// buf.WriteByte(0x0)
+			// err = binary.Write(buf, binary.LittleEndian, identity)
 
-			d.zmqSocket.SendMessage(string(buf.Bytes()), PROTO_KA, string(d.workers[identity].workerId))
+			strIdentity := identityIntToString(identity)
+
+			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, string(d.workers[identity].workerId))
 
 		}
 
@@ -195,14 +190,17 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			// TODO: this is done in one-client-mode just for protocol debugging. Implement it.
 			time.Sleep(time.Second)
 
-			buf := new(bytes.Buffer)
-			buf.WriteByte(0x0)
-			err = binary.Write(buf, binary.LittleEndian, identity)
+			// buf := new(bytes.Buffer)
+			// buf.WriteByte(0x0)
+			// err = binary.Write(buf, binary.LittleEndian, identity)
+
+			strIdentity := identityIntToString(identity)
+
 			if err != nil {
 				fmt.Println("Error while prapring message")
 			}
 
-			d.zmqSocket.SendMessage(string(buf.Bytes()), PROTO_KA, string(d.workers[identity].workerId))
+			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, string(d.workers[identity].workerId))
 		}
 
 		// 	} else if len(msg) == 3 {
@@ -225,20 +223,22 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 }
 
 func (d *Dispatcher) ZmqWriteLoopRun() {
-	for {
-		time.Sleep(time.Second)
-	}
+	// for {
+	// 	time.Sleep(time.Second)
+	// }
+
 }
 
-func (d *Dispatcher) getBestWorker(method string) uint32 {
+func (d *Dispatcher) getBestWorker(methodName string) uint32 {
 
 	candidates := d.methods[methodName]
-	shortest := ^uint(0)
+	shortest := ^int(0)
 	idx := 0
 
+	// TODO: check for safity and put a Mutex if needed.
 	for index, candidate := range candidates {
-		if len(candidate.tasks) < shortest {
-			shortest = len(candidate.tasks)
+		if len(d.workers[candidate].tasks) < shortest {
+			shortest = len(d.workers[candidate].tasks)
 			idx = index
 		}
 	}
@@ -246,48 +246,55 @@ func (d *Dispatcher) getBestWorker(method string) uint32 {
 	return candidates[idx]
 }
 
-func (d *Dispatcher) ExecuteMethod(msg *ApiMessage) {
+func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	fmt.Println("ExecuteMethod:", msg)
 
 	// TODO: validations and errors
 	// Select a worker
-	methodName := msg.method
 
-	bestWorker := d.getBestWorker(methodName)
+	bestWorker := d.getBestWorker(msg.method)
 
 	// Generate TaskID and chanel for response
 	taskUUID, _ := uuid.V4()
-	ch := make(chan string)
+	chResult := make(chan string)
 
 	// add Task to d.tsasks
 	// TODO: add check if _, ok := d.tasks[taskUuid]; !ok .......
 	d.tasks[taskUUID] = &Task{
-		chResult:       ch,
+		chResult:       chResult,
 		workerIdentity: bestWorker,
+	}
+
+	// Build and send message with type TASK using zmq writing loop
+	// buf := new(bytes.Buffer)
+	// buf.WriteByte(0x0)
+	// err = binary.Write(buf, binary.LittleEndian, identity)
+
+	strIdentity := identityIntToString(bestWorker)
+
+	d.workerMsgs <- []string{
+		strIdentity,
+		PROTO_TASK,
+		taskUUID.String(),
+		msg.method,
+		msg.params,
 	}
 
 	// setup cahanel listener for response with timeout
 
-	// Build a call message to send to worker
-	msgVal := &WorkerMsg{
-		Value: msg.params,
-	}
-	// Send the message
+	// TODO: Check chanels for existance etc.
 	select {
-	case d.workerMsgs <- msgVal: // <<< msg should be replaced by already parsed data
-	case <-time.After(time.Second * 2):
-		fmt.Println("Dispatcher workerMsgs timeout")
-	}
-}
-
-func remoteCall(apiMsg *ApiMessage, chResult chan string) {
-
-	go dispatcher.ExecuteMethod(apiMsg)
-
-	select {
-	case chResult <- strings.ToUpper(apiMsg.params):
-
+	case response := <-chResult:
+		chResponse <- response
+		// select {
+		// 	case chResponse, ok <- response:
+		// 		if !ok {
+		// 			fmt.Println("Chanel closed")
+		// 			 return
+		// 		}
+		// }
 	case <-time.After(time.Second * 2):
 		fmt.Println("timeout")
 	}
+
 }
