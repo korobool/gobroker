@@ -1,11 +1,11 @@
 package main
 
 const (
-	KA    = "KA"
-	ACK   = "ACK"
-	NACK  = "NACK"
-	TASK  = "TASK"
-	DONE  = "DONE"
-	READY = "READY"
-	QUIT  = "QUIT"
+	PROTO_KA    = "KA"
+	PROTO_ACK   = "ACK"
+	PROTO_NACK  = "NACK"
+	PROTO_TASK  = "TASK"
+	PROTO_DONE  = "DONE"
+	PROTO_READY = "READY"
+	PROTO_QUIT  = "QUIT"
 )
