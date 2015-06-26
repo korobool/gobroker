@@ -4,7 +4,7 @@ import (
 	"fmt"
 	zmq "github.com/pebbe/zmq4"
 	// "strings"
-	"bytes"
+	//"bytes"
 	"encoding/binary"
 	"time"
 )
@@ -68,11 +68,11 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			fmt.Println("ZmqReadLoopRun FAILED!")
 		}
 
-		var identity uint32
-		//b := []byte{0x0}
-		b := []byte(msg[1:])
-		buf := bytes.NewReader(b)
-		err = binary.Read(buf, binary.LittleEndian, &identity)
+		//var identity uint32
+		b := []byte(msg[0][1:])
+		//buf := bytes.NewReader(b)
+		//err = binary.Read(buf, binary.LittleEndian, &identity)
+		identity, _ := binary.Uvarint(b)
 
 		fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
 
