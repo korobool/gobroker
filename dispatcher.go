@@ -218,6 +218,14 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 func (d *Dispatcher) ExecuteMethod(msg *ApiMessage) {
 	fmt.Println("ExecuteMethod:", msg)
 
+	// Select a worker
+
+	// Generate TaskID
+
+	// add Task to d.tsasks
+
+	// setup cahanel listener for response with timeout
+
 	// Build a call message to send to worker
 	msgVal := &WorkerMsg{
 		Value: msg.params,
