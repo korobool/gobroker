@@ -252,7 +252,7 @@ func (d *Dispatcher) ZmqWriteLoopRun() {
 
 func (d *Dispatcher) getBestWorker(methodName string) uint32 {
 
-	fmt.Println("!!!!!!!!!!!!!!!!", d, GrosDispatcher)
+	fmt.Println("!!!!!!!!!!!!!!!!", d, GrossDispatcher)
 	candidates := d.methods[methodName]
 	shortest := ^int(0)
 	idx := 0
