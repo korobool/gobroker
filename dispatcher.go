@@ -11,8 +11,11 @@ import (
 )
 
 const (
-	MaxWorkers   = 16
-	PollInterval = 1000 * time.Millisecond
+	MaxWorkers           = 16
+	PollInterval         = 1000 * time.Millisecond
+	AliveTimeout         = 2
+	MaxKAFailed          = 2
+	HeartbeetingInterval = 1 * time.Second
 )
 
 // type WorkerMsg struct {
@@ -73,6 +76,39 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 		methods:      make(map[string][]uint32),
 		ids:          map[string][MaxWorkers]bool{},
 	}, err
+}
+
+func (d *Dispatcher) run() {
+	// Starting zeromq loop
+	go d.ZmqReadLoopRun()
+	go d.ZmqWriteLoopRun()
+	go d.HeartbeatingRun()
+}
+
+func (d *Dispatcher) HeartbeatingRun() {
+	for {
+
+		deleteList := []uint32{}
+
+		now := time.Now().Unix()
+		for identity, worker := range d.workers {
+			if now-worker.kaLast > AliveTimeout {
+				if worker.kaFailed > MaxKAFailed {
+					deleteList = append(deleteList, identity)
+					continue
+				} else {
+					d.workers[identity].kaFailed += 1
+				}
+			}
+			strIdentity := identityIntToString(identity)
+			d.outboundMsgs <- []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
+		}
+		for _, id := range deleteList {
+			d.removeWorker(id)
+		}
+
+		time.Sleep(HeartbeetingInterval)
+	}
 }
 
 func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
@@ -179,8 +215,8 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 
 			strIdentity := identityIntToString(identity)
 
-			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, string(d.workers[identity].workerId))
-
+			firstValuebleKA := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId)}
+			d.outboundMsgs <- firstValuebleKA
 		}
 
 		// TODO: We need to ignore all the messages from workers with unnkown identity
@@ -190,21 +226,22 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			d.workers[identity].kaFailed = 0
 
 			// TODO: this is done in one-client-mode just for protocol debugging. Implement it.
-			time.Sleep(time.Second)
+			// time.Sleep(time.Second)
 
 			// buf := new(bytes.Buffer)
 			// buf.WriteByte(0x0)
 			// err = binary.Write(buf, binary.LittleEndian, identity)
 
-			strIdentity := identityIntToString(identity)
+			// strIdentity := identityIntToString(identity)
 
 			if err != nil {
 				fmt.Println("Error while prapring message")
 			}
-			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
+			// d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
+
 		}
 		if msg[1] == PROTO_DONE {
-
+			fmt.Println("msg[1]: PROTO_DONE")
 			if len(msg) < 3 {
 				return errors.New("Malformed message")
 			}
@@ -244,15 +281,14 @@ func (d *Dispatcher) ZmqWriteLoopRun() {
 		select {
 		case msg := <-d.outboundMsgs:
 			d.zmqSocket.SendMessage(msg)
-		case <-time.After(time.Second * 2):
-			fmt.Println("timeout")
+		case <-time.After(time.Second * 10):
+			fmt.Println("ZmqWriteLoopRun: timeout")
 		}
 	}
 }
 
 func (d *Dispatcher) getBestWorker(methodName string) uint32 {
 
-	fmt.Println("!!!!!!!!!!!!!!!!", d, GrossDispatcher)
 	candidates := d.methods[methodName]
 	shortest := ^int(0)
 	idx := 0
@@ -310,16 +346,9 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 		fmt.Printf("ExecuteMethod got result %s", response)
 		chResponse <- response
 		fmt.Println("ExecuteMethod write response")
-
-		// select {
-		// 	case chResponse, ok <- response:
-		// 		if !ok {
-		// 			fmt.Println("Chanel closed")
-		// 			 return
-		// 		}
-		// }
 	case <-time.After(time.Second * 2):
-		fmt.Println("timeout")
+		delete(d.tasks, taskUUID)
+		fmt.Println("ExecuteMethod timeout")
 	}
 
 }

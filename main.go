@@ -14,12 +14,12 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
-	// fmt.Println(">>>", dispatcher)
 	GrossDispatcher = *dispatcher
 
-	// Starting zeromq loop
-	go GrossDispatcher.ZmqReadLoopRun()
-	go GrossDispatcher.ZmqWriteLoopRun()
+	// // Starting zeromq loop
+	// go GrossDispatcher.ZmqReadLoopRun()
+	// go GrossDispatcher.ZmqWriteLoopRun()
+	GrossDispatcher.run()
 
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
