@@ -6,11 +6,12 @@ import (
 	"net/http"
 )
 
-var GrosDispatcher *Dispatcher
+var GrosDispatcher Dispatcher
 
 func main() {
 	router := NewRouter()
-	GrosDispatcher, err := NewDispatcher("tcp://0.0.0.0:7070")
+	dispatcher, err := NewDispatcher("tcp://0.0.0.0:7070")
+	GrosDispatcher = *dispatcher
 	if err != nil {
 		fmt.Println(err)
 	}

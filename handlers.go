@@ -32,9 +32,8 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 		params: fmt.Sprintf("{'appID': %s}", appID),
 	}
 
-	go GrosDispatcher.ExecuteMethod(&apiMsg, chResult)
-
 	fmt.Println(">>>>>>>>>>>>>>>>!!!", GrosDispatcher)
+	go GrosDispatcher.ExecuteMethod(&apiMsg, chResult)
 
 	select {
 	case result, ok := <-chResult:

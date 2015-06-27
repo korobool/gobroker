@@ -66,6 +66,7 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 		zmqSocket:    zmqSocket,
 		zmqPoller:    zmqPoller,
 		locks:        Locks{workers: new(sync.RWMutex)},
+		tasks:        make(map[uuid.UUID]*Task),
 		outboundMsgs: make(chan []string),
 		workers:      make(map[uint32]*WorkerInfo),
 		methods:      make(map[string][]uint32),
