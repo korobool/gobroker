@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/m4rw3r/uuid"
 	zmq "github.com/pebbe/zmq4"
@@ -200,8 +201,23 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			if err != nil {
 				fmt.Println("Error while prapring message")
 			}
+			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
+		}
+		if msg[1] == PROTO_DONE {
 
-			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, string(d.workers[identity].workerId))
+			if len(msg) < 3 {
+				return errors.New("Malformed message")
+			}
+			taskId, err := uuid.FromString(msg[2])
+			if err != nil {
+				return errors.New("Wrong UUID in message")
+			}
+
+			if task, ok := d.tasks[taskId]; ok {
+				fmt.Println("IN DONE!!!!!!")
+				task.chResult <- msg[3]
+			}
+
 		}
 
 		// 	} else if len(msg) == 3 {
@@ -291,7 +307,10 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	// TODO: Check chanels for existance etc.
 	select {
 	case response := <-chResult:
+		fmt.Printf("ExecuteMethod got result %s", response)
 		chResponse <- response
+		fmt.Println("ExecuteMethod write response")
+
 		// select {
 		// 	case chResponse, ok <- response:
 		// 		if !ok {

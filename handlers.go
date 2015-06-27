@@ -29,7 +29,7 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 
 	apiMsg := ApiMessage{
 		method: "get_app_dists",
-		params: fmt.Sprintf("{'appID': %s}", appID),
+		params: fmt.Sprintf("{\"app_id\": \"%s\"}", appID),
 	}
 
 	fmt.Println(">>>>>>>>>>>>>>>>!!!", GrosDispatcher)
@@ -40,9 +40,11 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			fmt.Println("Chanel closed")
 		}
-		fmt.Println(result)
-	case <-time.After(time.Second * 3):
+		fmt.Printf("GetDists handler result: %s", result)
+	case <-time.After(time.Second * 10):
 		fmt.Println("timeout")
+		// write here
+		return
 	}
 }
 
