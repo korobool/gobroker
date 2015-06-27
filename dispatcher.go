@@ -179,8 +179,7 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 
 			strIdentity := identityIntToString(identity)
 
-			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, string(d.workers[identity].workerId))
-
+			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
 		}
 
 		// TODO: We need to ignore all the messages from workers with unnkown identity
@@ -201,6 +200,7 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			if err != nil {
 				fmt.Println("Error while prapring message")
 			}
+			// TODO: should store workerId as a string
 			d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
 		}
 		if msg[1] == PROTO_DONE {
