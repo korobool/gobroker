@@ -354,3 +354,31 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	}
 
 }
+
+func (d *Dispatcher) RemoteCall(methodName string, params string, timeout time.Duration) (string, error) {
+
+	var err error = nil
+	// var result string
+
+	chResult := make(chan string)
+
+	apiMsg := ApiMessage{
+		method: methodName,
+		params: params,
+	}
+
+	go GrossDispatcher.ExecuteMethod(&apiMsg, chResult)
+
+	select {
+	case result, ok := <-chResult:
+		if !ok {
+			err = errors.New("Chanel closed")
+		}
+		return result, err
+
+	case <-time.After(timeout):
+		err = errors.New("RemoteCall timeout reached.")
+		return "", err
+	}
+
+}

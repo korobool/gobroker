@@ -8,12 +8,32 @@ import (
 	"time"
 )
 
+const (
+	HashLength = 20
+)
+
 type ApiMessage struct {
 	method string
 	params string
 }
 
 func Redirect(w http.ResponseWriter, r *http.Request) {
+	// vars := mux.Vars(r)
+	// hash := vars["hash"]
+	// if len(hash) > HashLength { // TODO: add checking for alphanumeric
+	// 	w.WriteHeader(http.StatusForbidden) // TODO: Provide reason message
+	// 	return
+	// }
+
+	// params := ""
+
+	// expandJson, err := GrossDispatcher.RemoteCall("expand", params, time.Second*4)
+
+	// if err != nil {
+	// 	fmt.Println("REMOTE CALL TIMEOUT")
+	// }
+
+	// w.WriteHeader(http.StatusFound)
 
 }
 
