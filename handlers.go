@@ -19,7 +19,7 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 func GetDists(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(http.StatusMovedPermanently)
+	// w.WriteHeader(http.StatusMovedPermanently)
 
 	chResult := make(chan string)
 
@@ -32,19 +32,17 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 		params: fmt.Sprintf("{\"app_id\": \"%s\"}", appID),
 	}
 
-	fmt.Println(">>>>>>>>>>>>>>>>!!!", GrosDispatcher)
-	go GrosDispatcher.ExecuteMethod(&apiMsg, chResult)
+	go GrossDispatcher.ExecuteMethod(&apiMsg, chResult)
 
 	select {
 	case result, ok := <-chResult:
 		if !ok {
 			fmt.Println("Chanel closed")
 		}
-		fmt.Printf("GetDists handler result: %s", result)
-	case <-time.After(time.Second * 10):
-		fmt.Println("timeout")
-		// write here
-		return
+		fmt.Fprintf(w, result)
+
+	case <-time.After(time.Second * 4):
+		w.WriteHeader(http.StatusRequestTimeout)
 	}
 }
 
