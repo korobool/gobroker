@@ -118,7 +118,10 @@ func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
 
 	workerType := msg[2]
 
-	workerId := d.takeWorkerId(workerType)
+	workerId, err := d.takeWorkerId(workerType)
+	if err != nil {
+		fmt.Println(err)
+	}
 
 	d.workers[identity] = &WorkerInfo{
 		workerId:   workerId,
@@ -155,7 +158,7 @@ func (d *Dispatcher) releaseWorkerId(id uint8, workerType string) {
 	d.ids[workerType] = ids
 }
 
-func (d *Dispatcher) takeWorkerId(workerType string) uint8 {
+func (d *Dispatcher) takeWorkerId(workerType string) (uint8, error) {
 
 	// TODO: Take id lists from the map
 	if _, ok := d.ids[workerType]; !ok {
@@ -168,11 +171,11 @@ func (d *Dispatcher) takeWorkerId(workerType string) uint8 {
 			ids := d.ids[workerType]
 			ids[idx] = true
 			d.ids[workerType] = ids
-			return uint8(idx + 1)
+			return uint8(idx + 1), nil
 		}
 	}
 
-	return 0
+	return 0, errors.New("No free woker id")
 }
 
 func (d *Dispatcher) ZmqReadLoopRun() error {
