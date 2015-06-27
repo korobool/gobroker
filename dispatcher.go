@@ -238,7 +238,6 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 				fmt.Println("Error while prapring message")
 			}
 			// d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
-
 		}
 		if msg[1] == PROTO_DONE {
 			fmt.Println("msg[1]: PROTO_DONE")
