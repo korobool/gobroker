@@ -15,7 +15,7 @@ const (
 	PollInterval         = 1000 * time.Millisecond
 	AliveTimeout         = 2
 	MaxKAFailed          = 2
-	HeartbeetingInterval = 1 * time.Second
+	HeartbeatingInterval = 1 * time.Second
 )
 
 // type WorkerMsg struct {
@@ -25,9 +25,14 @@ const (
 type WorkerInfo struct {
 	workerId   uint8
 	workerType string
-	tasks      []string
+	tasks      []TaskId
 	kaFailed   int8
 	kaLast     int64
+}
+
+type TaskId struct {
+	workerIdentity uint32
+	taskUUID       uuid.UUID
 }
 
 type Task struct {
@@ -37,6 +42,7 @@ type Task struct {
 
 type Locks struct {
 	workers *sync.RWMutex
+	socket  *sync.Mutex
 }
 
 type Dispatcher struct {
@@ -45,7 +51,7 @@ type Dispatcher struct {
 	locks     Locks
 	//TODO: synchronize this map
 	//use this datastructure https://github.com/streamrail/concurrent-map
-	tasks        map[uuid.UUID]*Task
+	tasks        map[TaskId]*Task
 	outboundMsgs chan []string
 	workers      map[uint32]*WorkerInfo
 	methods      map[string][]uint32
@@ -53,7 +59,10 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(uri string) (*Dispatcher, error) {
-
+	//context, err := zmq.NewContext()
+	//if err != nil {
+	//	return nil, err
+	//}
 	zmqSocket, err := zmq.NewSocket(zmq.ROUTER)
 	if err != nil {
 		return nil, err
@@ -69,8 +78,8 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	return &Dispatcher{
 		zmqSocket:    zmqSocket,
 		zmqPoller:    zmqPoller,
-		locks:        Locks{workers: new(sync.RWMutex)},
-		tasks:        make(map[uuid.UUID]*Task),
+		locks:        Locks{workers: new(sync.RWMutex), socket: new(sync.Mutex)},
+		tasks:        make(map[TaskId]*Task),
 		outboundMsgs: make(chan []string),
 		workers:      make(map[uint32]*WorkerInfo),
 		methods:      make(map[string][]uint32),
@@ -88,13 +97,13 @@ func (d *Dispatcher) run() {
 func (d *Dispatcher) HeartbeatingRun() {
 	for {
 
-		deleteList := []uint32{}
+		removeList := []uint32{}
 
 		now := time.Now().Unix()
 		for identity, worker := range d.workers {
 			if now-worker.kaLast > AliveTimeout {
 				if worker.kaFailed > MaxKAFailed {
-					deleteList = append(deleteList, identity)
+					removeList = append(removeList, identity)
 					continue
 				} else {
 					d.workers[identity].kaFailed += 1
@@ -103,11 +112,11 @@ func (d *Dispatcher) HeartbeatingRun() {
 			strIdentity := identityIntToString(identity)
 			d.outboundMsgs <- []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
 		}
-		for _, id := range deleteList {
+		for _, id := range removeList {
 			d.removeWorker(id)
 		}
 
-		time.Sleep(HeartbeetingInterval)
+		time.Sleep(HeartbeatingInterval)
 	}
 }
 
@@ -126,7 +135,7 @@ func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
 	d.workers[identity] = &WorkerInfo{
 		workerId:   workerId,
 		workerType: workerType,
-		tasks:      []string{},
+		tasks:      []TaskId{},
 		kaLast:     0,
 		kaFailed:   0,
 	}
@@ -146,10 +155,32 @@ func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
 	return nil
 }
 
+func (d *Dispatcher) removeTasks(taskIds []TaskId) {
+	for _, taskId := range taskIds {
+		close(d.tasks[taskId].chResult)
+		delete(d.tasks, taskId)
+	}
+}
+
 func (d *Dispatcher) removeWorker(identity uint32) {
 	d.locks.workers.Lock()
 	defer d.locks.workers.Unlock()
 
+	freshIdentitySlice := []uint32{}
+	for method, identitySlice := range d.methods {
+		for _, id := range identitySlice {
+			if id != identity {
+				freshIdentitySlice = append(freshIdentitySlice, id)
+			}
+		}
+		d.methods[method] = freshIdentitySlice
+	}
+
+	d.releaseWorkerId(d.workers[identity].workerId, d.workers[identity].workerType)
+
+	d.removeTasks(d.workers[identity].tasks)
+
+	delete(d.workers, identity)
 }
 
 func (d *Dispatcher) releaseWorkerId(id uint8, workerType string) {
@@ -191,8 +222,9 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			continue
 		}
 
+		d.locks.socket.Lock()
 		msg, err := d.zmqSocket.RecvMessage(0)
-
+		d.locks.socket.Unlock()
 		if err != nil {
 			break
 			fmt.Println("ZmqReadLoopRun FAILED!")
@@ -247,12 +279,12 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			if len(msg) < 3 {
 				return errors.New("Malformed message")
 			}
-			taskId, err := uuid.FromString(msg[2])
+			taskUUID, err := uuid.FromString(msg[2])
 			if err != nil {
 				return errors.New("Wrong UUID in message")
 			}
 
-			if task, ok := d.tasks[taskId]; ok {
+			if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
 				fmt.Println("IN DONE!!!!!!")
 				task.chResult <- msg[3]
 			}
@@ -282,7 +314,9 @@ func (d *Dispatcher) ZmqWriteLoopRun() {
 	for {
 		select {
 		case msg := <-d.outboundMsgs:
+			d.locks.socket.Lock()
 			d.zmqSocket.SendMessage(msg)
+			d.locks.socket.Unlock()
 		case <-time.After(time.Second * 10):
 			fmt.Println("ZmqWriteLoopRun: timeout")
 		}
@@ -318,12 +352,14 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	taskUUID, _ := uuid.V4()
 	chResult := make(chan string)
 
+	taskId := TaskId{bestWorker, taskUUID}
 	// add Task to d.tsasks
 	// TODO: add check if _, ok := d.tasks[taskUuid]; !ok .......
-	d.tasks[taskUUID] = &Task{
+	d.tasks[taskId] = &Task{
 		chResult:       chResult,
 		workerIdentity: bestWorker,
 	}
+	d.workers[bestWorker].tasks = append(d.workers[bestWorker].tasks, taskId)
 
 	// Build and send message with type TASK using zmq writing loop
 	// buf := new(bytes.Buffer)
@@ -349,7 +385,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 		chResponse <- response
 		fmt.Println("ExecuteMethod write response")
 	case <-time.After(time.Second * 2):
-		delete(d.tasks, taskUUID)
+		d.removeTasks([]TaskId{taskId})
 		fmt.Println("ExecuteMethod timeout")
 	}
 
