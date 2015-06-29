@@ -115,7 +115,6 @@ func (d *Dispatcher) HeartbeatingRun() {
 		for _, id := range removeList {
 			d.removeWorker(id)
 		}
-
 		time.Sleep(HeartbeatingInterval)
 	}
 }
@@ -166,8 +165,8 @@ func (d *Dispatcher) removeWorker(identity uint32) {
 	d.locks.workers.Lock()
 	defer d.locks.workers.Unlock()
 
-	freshIdentitySlice := []uint32{}
 	for method, identitySlice := range d.methods {
+		freshIdentitySlice := []uint32{}
 		for _, id := range identitySlice {
 			if id != identity {
 				freshIdentitySlice = append(freshIdentitySlice, id)
@@ -275,7 +274,7 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			// d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
 		}
 		if msg[1] == PROTO_DONE {
-			fmt.Println("msg[1]: PROTO_DONE")
+			//fmt.Println("msg[1]: PROTO_DONE")
 			if len(msg) < 3 {
 				return errors.New("Malformed message")
 			}
@@ -285,7 +284,7 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			}
 
 			if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
-				fmt.Println("IN DONE!!!!!!")
+				//fmt.Println("IN DONE!!!!!!")
 				task.chResult <- msg[3]
 			}
 
@@ -336,7 +335,6 @@ func (d *Dispatcher) getBestWorker(methodName string) uint32 {
 			idx = index
 		}
 	}
-
 	return candidates[idx]
 }
 
