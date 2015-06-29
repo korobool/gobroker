@@ -7,7 +7,8 @@ import (
 	"github.com/gorilla/mux"
 	// "github.com/mssola/user_agent"
 	//"github.com/varstr/uaparser"
-	"html/template"
+	//"html/template"
+	//"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
@@ -187,47 +188,39 @@ func GetLendingPage(w http.ResponseWriter, r *http.Request) {
 	var meta map[string]string
 
 	var context struct {
-		meta  map[string]string
-		image string
+		Meta  map[string]string
+		Image string
 	}
 
 	if platform == PlatformAndroid {
 
 		err = json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
 
-		context.meta = meta
-		context.image = meta["image"]
+		context.Meta = meta
+		context.Image = meta["image"]
 
 	} else if platform == PlatformIPhone {
 		err = json.Unmarshal([]byte(landingResult.MetaApple), &meta)
 
-		context.meta = meta
-		context.image = meta["image"]
+		context.Meta = meta
+		context.Image = meta["image"]
 
 	} else {
 		err = json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
 
-		context.meta = nil
-		context.image = meta["image"]
+		context.Meta = nil
+		context.Image = meta["image"]
 	}
 
-	fmt.Println(">>>context:", context)
+	//t := template.New(landingResult.Template)
 
-	t := temaplate.Must(template.New("landing").ParseFiles("media/templates/valutchik.tpl"))
+	// templateString, _ := ioutil.ReadFile(
+	// 	"media/templates/valutchik.tpl")
 
-	t.Execute(w, context)
+	// t, _ = t.Parse(string(templateString))
 
-	// Render template
-
-	// if device_os == ANDROID_DEVICE:
-	//     context = {"meta": meta_android, "image": meta_android["image"]}
-	// elif device_os == IOS_DEVICE:
-	//     context = {"meta": meta_apple, "image": meta_apple["image"]}
-	// else:
-	//     context = {"meta": None, "image": meta_android["image"]}
-
-	// response = aiohttp_jinja2.render_template(
-	//     landing['template'], request, context)
-	// response.headers['Content-Language'] = 'en'
-
+	err = landingTempl.ExecuteTemplate(w, landingResult.Template, context)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }

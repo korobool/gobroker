@@ -1,10 +1,10 @@
 <html>
   <head>
-    {% if meta %}
-        {% for key, value in meta.items() %}
-            <meta name="{{ key }}" content="{{ value }}">
-        {% endfor %}
-    {% endif %}
+    {{ if .Meta }}
+      {{ range $key, $value := .Meta }}
+          <meta name="{{ $key }}" content="{{ $value }}">
+      {{ end }}
+    {{ end }}
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
@@ -15,6 +15,6 @@
     <script>$(function () { $.smartbanner({}); });</script>
   </head>
   <body>
-    <img class="landing" src="/img/{{ image }}">
+    <img class="landing" src="/img/{{ .Image }}">
   </body>
 </html>
