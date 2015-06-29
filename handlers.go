@@ -1,14 +1,10 @@
 package main
 
 import (
-	// "encoding/json"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gorilla/mux"
-	// "github.com/mssola/user_agent"
-	//"github.com/varstr/uaparser"
-	//"html/template"
-	//"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
@@ -16,7 +12,9 @@ import (
 
 const (
 	HashLength     = 20
+	AppIdLength    = 15
 	DefaultTimeout = time.Second * 1
+	ApiKeyHeader   = "X-API-KEY"
 )
 
 type ApiMessage struct {
@@ -63,7 +61,6 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if data.AppId == "" {
-		// w.WriteHeader(http.NotFound(w, r)) // TODO: add "not found" page
 		http.NotFound(w, r)
 		return
 	}
@@ -106,15 +103,98 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func checkAuth(authHeader string) (string, error) {
+	msg := struct {
+		ApiKey string `json:"api_key"`
+	}{authHeader}
+
+	params, _ := json.Marshal(msg)
+
+	customerJSON, err := GrossDispatcher.RemoteCall(
+		"get_customer",
+		string(params),
+		DefaultTimeout,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	var data struct {
+		CustomerId string `json:"customer_id"`
+	}
+
+	err = json.Unmarshal([]byte(customerJSON), &data)
+	if data.CustomerId == "" {
+		return "", errors.New("No such API key")
+	}
+
+	return data.CustomerId, nil
+}
+
+func checkAppId(appId string, customerId string) error {
+	msg := struct {
+		CustomerId string `json:"customer_id"`
+	}{customerId}
+
+	params, _ := json.Marshal(msg)
+
+	appsJSON, err := GrossDispatcher.RemoteCall(
+		"get_customer_apps",
+		string(params),
+		DefaultTimeout,
+	)
+
+	var data struct {
+		Apps []string `json:"apps"`
+	}
+
+	err = json.Unmarshal([]byte(appsJSON), &data)
+	if err != nil {
+		return err
+	}
+
+	for _, value := range data.Apps {
+		if value == appId {
+			return nil
+		}
+	}
+	return errors.New("Not permited AppId for this customer")
+}
+
 func GetDists(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
+	customerId, err := checkAuth(r.Header.Get(ApiKeyHeader))
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
 	vars := mux.Vars(r)
-	appID := vars["appID"]
-	params := fmt.Sprintf("{\"app_id\": \"%s\"}", appID)
+	appId := vars["appID"]
+
+	if len(appId) > AppIdLength {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	err = checkAppId(appId, customerId)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	//params := fmt.Sprintf("{\"app_id\": \"%s\"}", appId)
+	msg := struct {
+		AppId string `json:"app_id"`
+	}{appId}
+
+	params, _ := json.Marshal(msg)
 
 	// TODO: RemoteCall err returning wasn't checked
-	expandJson, _ := GrossDispatcher.RemoteCall("get_app_dists", params, time.Second*4)
-	fmt.Fprintf(w, expandJson)
+	distsJSON, _ := GrossDispatcher.RemoteCall("get_app_dists", string(params), DefaultTimeout)
+
+	fmt.Fprintf(w, distsJSON)
 }
 
 func Share(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +245,7 @@ func GetLendingPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: Refactor copy-paste
 	/////////////////////////////////////////////////////////////////////////////
 
 	landingMsg := struct {
@@ -211,13 +292,6 @@ func GetLendingPage(w http.ResponseWriter, r *http.Request) {
 		context.Meta = nil
 		context.Image = meta["image"]
 	}
-
-	//t := template.New(landingResult.Template)
-
-	// templateString, _ := ioutil.ReadFile(
-	// 	"media/templates/valutchik.tpl")
-
-	// t, _ = t.Parse(string(templateString))
 
 	err = landingTempl.ExecuteTemplate(w, landingResult.Template, context)
 	if err != nil {

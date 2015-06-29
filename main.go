@@ -13,8 +13,8 @@ var landingTempl *template.Template
 
 func main() {
 
+	// TODO: Do it properly (at least call a function load templates...)
 	landingTempl = template.New("valutchik.html")
-
 	templateStr, err := ioutil.ReadFile("media/templates/valutchik.html")
 	if err != nil {
 		fmt.Println(err)
