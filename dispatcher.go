@@ -128,7 +128,7 @@ func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
 
 	workerId, err := d.takeWorkerId(workerType)
 	if err != nil {
-		fmt.Println(err)
+		return err
 	}
 
 	d.workers[identity] = &WorkerInfo{
@@ -240,7 +240,11 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 				d.removeWorker(identity)
 			}
 
-			d.addWorker(identity, msg)
+			err = d.addWorker(identity, msg)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
 
 			strIdentity := identityIntToString(identity)
 

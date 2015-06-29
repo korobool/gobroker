@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/mux"
 	// "github.com/mssola/user_agent"
 	//"github.com/varstr/uaparser"
+	"html/template"
 	"net/http"
 	"strings"
 	"time"
@@ -38,13 +39,13 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 	// fmt.Println("params >> ", string(params), params, hash, msg)
 
-	expandJson, err := GrossDispatcher.RemoteCall(
+	expandJSON, err := GrossDispatcher.RemoteCall(
 		"expand",
 		string(params),
 		DefaultTimeout,
 	)
 
-	// TODO: validate expandJson for
+	// TODO: validate expandJSON for
 
 	var data struct {
 		AppId string `json:"app_id"`
@@ -54,7 +55,7 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 		} `json:"urls"`
 	}
 
-	err = json.Unmarshal([]byte(expandJson), &data)
+	err = json.Unmarshal([]byte(expandJSON), &data)
 
 	if err != nil {
 		fmt.Println("REMOTE CALL TIMEOUT")
@@ -120,5 +121,113 @@ func Share(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetLendingPage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	hash := vars["hash"]
+	if len(hash) > HashLength { // TODO: add checking for alphanumeric
+		w.WriteHeader(http.StatusForbidden) // TODO: Provide reason message
+		return
+	}
+
+	msg := struct {
+		Hash string `json:"hash"`
+	}{hash}
+
+	params, _ := json.Marshal(msg)
+
+	// fmt.Println("params >> ", string(params), params, hash, msg)
+
+	expandJson, err := GrossDispatcher.RemoteCall(
+		"expand",
+		string(params),
+		DefaultTimeout,
+	)
+
+	// TODO: validate expandJson for
+
+	var data struct {
+		AppId string `json:"app_id"`
+		Urls  struct {
+			Android string `json:"android"`
+			Apple   string `json:"apple"`
+		} `json:"urls"`
+	}
+
+	err = json.Unmarshal([]byte(expandJson), &data)
+
+	if err != nil {
+		fmt.Println("REMOTE CALL TIMEOUT")
+	}
+
+	if data.AppId == "" {
+		// w.WriteHeader(http.NotFound(w, r)) // TODO: add "not found" page
+		http.NotFound(w, r)
+		return
+	}
+
+	/////////////////////////////////////////////////////////////////////////////
+
+	landingMsg := struct {
+		AppId string `json:"app_id"`
+	}{data.AppId}
+
+	landingParams, _ := json.Marshal(landingMsg)
+
+	landigJSON, err := GrossDispatcher.RemoteCall("get_app_landing", string(landingParams), DefaultTimeout)
+
+	var landingResult struct {
+		MetaApple   string `json:"meta_apple"`
+		MetaAndroid string `json:"meta_android"`
+		Template    string `json:"template"`
+	}
+
+	err = json.Unmarshal([]byte(landigJSON), &landingResult)
+
+	platform := getPlatform(r.UserAgent())
+
+	var meta map[string]string
+
+	var context struct {
+		meta  map[string]string
+		image string
+	}
+
+	if platform == PlatformAndroid {
+
+		err = json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
+
+		context.meta = meta
+		context.image = meta["image"]
+
+	} else if platform == PlatformIPhone {
+		err = json.Unmarshal([]byte(landingResult.MetaApple), &meta)
+
+		context.meta = meta
+		context.image = meta["image"]
+
+	} else {
+		err = json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
+
+		context.meta = nil
+		context.image = meta["image"]
+	}
+
+	fmt.Println(">>>context:", context)
+
+	t := temaplate.Must(template.New("landing").ParseFiles("media/templates/valutchik.tpl"))
+
+	t.Execute(w, context)
+
+	// Render template
+
+	// if device_os == ANDROID_DEVICE:
+	//     context = {"meta": meta_android, "image": meta_android["image"]}
+	// elif device_os == IOS_DEVICE:
+	//     context = {"meta": meta_apple, "image": meta_apple["image"]}
+	// else:
+	//     context = {"meta": None, "image": meta_android["image"]}
+
+	// response = aiohttp_jinja2.render_template(
+	//     landing['template'], request, context)
+	// response.headers['Content-Language'] = 'en'
 
 }
