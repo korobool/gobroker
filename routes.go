@@ -15,14 +15,14 @@ var routes = Routes{
 	Route{
 		"Dists",
 		"GET",
-		"/apps/{appID}/dists",
-		GetDists,
+		"/apps/{appId}/dists",
+		AppDists,
 	},
 	Route{
 		"Share",
 		"GET",
-		"/apps/{appID}/share",
-		Share,
+		"/apps/{appId}/share",
+		AppShare,
 	},
 	Route{
 		"Redirection",
@@ -31,9 +31,9 @@ var routes = Routes{
 		Redirect,
 	},
 	Route{
-		"Lending",
+		"Landing",
 		"GET",
 		"/l/{hash}",
-		GetLendingPage,
+		Landing,
 	},
 }

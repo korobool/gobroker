@@ -293,7 +293,7 @@ func (d *Dispatcher) ZmqWriteLoopRun() {
 	}
 }
 
-func (d *Dispatcher) getBestWorker(methodName string) uint32 {
+func (d *Dispatcher) getBestWorker(methodName string) (uint32, error) {
 
 	candidates := d.methods[methodName]
 	shortest := ^int(0)
@@ -306,7 +306,11 @@ func (d *Dispatcher) getBestWorker(methodName string) uint32 {
 			idx = index
 		}
 	}
-	return candidates[idx]
+
+	if len(candidates) == 0 {
+		return 0, errors.New("No free workers avaliable")
+	}
+	return candidates[idx], nil
 }
 
 func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
@@ -315,7 +319,12 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	// TODO: validations and errors
 	// Select a worker
 
-	bestWorker := d.getBestWorker(msg.method)
+	bestWorker, err := d.getBestWorker(msg.method)
+	if err != nil {
+		close(chResponse)
+		fmt.Println(err)
+		return
+	}
 
 	// Generate TaskID and chanel for response
 	taskUUID, _ := uuid.V4()

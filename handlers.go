@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/gorilla/mux"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +16,7 @@ const (
 	AppIdLength    = 15
 	DefaultTimeout = time.Second * 1
 	ApiKeyHeader   = "X-API-KEY"
+	DomainHeader   = "Host"
 )
 
 type ApiMessage struct {
@@ -23,6 +25,7 @@ type ApiMessage struct {
 }
 
 func Redirect(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 	vars := mux.Vars(r)
 	hash := vars["hash"]
 	if len(hash) > HashLength { // TODO: add checking for alphanumeric
@@ -103,7 +106,7 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func checkAuth(authHeader string) (string, error) {
+func checkAuth(authHeader string) (int, error) {
 	msg := struct {
 		ApiKey string `json:"api_key"`
 	}{authHeader}
@@ -116,7 +119,7 @@ func checkAuth(authHeader string) (string, error) {
 		DefaultTimeout,
 	)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 
 	var data struct {
@@ -124,16 +127,19 @@ func checkAuth(authHeader string) (string, error) {
 	}
 
 	err = json.Unmarshal([]byte(customerJSON), &data)
-	if data.CustomerId == "" {
-		return "", errors.New("No such API key")
+
+	//WORKAROUND: recieving customer_id as string from Auth-worker
+	customer, _ := strconv.Atoi(data.CustomerId)
+	if customer == 0 {
+		return 0, errors.New("No such API key")
 	}
 
-	return data.CustomerId, nil
+	return customer, nil
 }
 
-func checkAppId(appId string, customerId string) error {
+func checkAppId(appId string, customerId int) error {
 	msg := struct {
-		CustomerId string `json:"customer_id"`
+		CustomerId int `json:"customer_id"`
 	}{customerId}
 
 	params, _ := json.Marshal(msg)
@@ -161,7 +167,7 @@ func checkAppId(appId string, customerId string) error {
 	return errors.New("Not permited AppId for this customer")
 }
 
-func GetDists(w http.ResponseWriter, r *http.Request) {
+func AppDists(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	customerId, err := checkAuth(r.Header.Get(ApiKeyHeader))
@@ -171,7 +177,7 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	appId := vars["appID"]
+	appId := vars["appId"]
 
 	if len(appId) > AppIdLength {
 		w.WriteHeader(http.StatusForbidden)
@@ -197,11 +203,79 @@ func GetDists(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, distsJSON)
 }
 
-func Share(w http.ResponseWriter, r *http.Request) {
+func AppShare(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
+	customerId, err := checkAuth(r.Header.Get(ApiKeyHeader))
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	appId := vars["appId"]
+
+	if len(appId) > AppIdLength {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	err = checkAppId(appId, customerId)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	msg := struct {
+		AppId string `json:"app_id"`
+	}{appId}
+
+	params, _ := json.Marshal(msg)
+
+	infoJSON, _ := GrossDispatcher.RemoteCall("get_app_info", string(params), DefaultTimeout)
+
+	type InfoResult struct {
+		UrlApple   string `json:"url_apple"`
+		UrlAndroid string `json:"url_android"`
+	}
+	var infoResult InfoResult
+
+	err = json.Unmarshal([]byte(infoJSON), &infoResult)
+
+	data := struct {
+		CustomerId int        `json:"customer_id"`
+		Domain     string     `json:"domain"`
+		Urls       InfoResult `json:"urls"`
+	}{
+		customerId,
+		r.Header.Get(DomainHeader),
+		infoResult,
+	}
+	params, _ = json.Marshal(data)
+
+	shortenJSON, _ := GrossDispatcher.RemoteCall("shorten", string(params), DefaultTimeout)
+
+	var shortenData struct {
+		Hash string `json:"hash"`
+	}
+
+	err = json.Unmarshal([]byte(shortenJSON), &shortenData)
+
+	resultData := struct {
+		Redirect string `json:"redirect"`
+		Landing  string `json:"landing"`
+	}{
+		fmt.Sprintf("%s/%s", rootPath, shortenData.Hash),
+		fmt.Sprintf("%s/l/%s", rootPath, shortenData.Hash),
+	}
+	resultJSON, _ := json.Marshal(resultData)
+
+	fmt.Fprintf(w, string(resultJSON))
 }
 
-func GetLendingPage(w http.ResponseWriter, r *http.Request) {
+func Landing(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+
 	vars := mux.Vars(r)
 	hash := vars["hash"]
 	if len(hash) > HashLength { // TODO: add checking for alphanumeric

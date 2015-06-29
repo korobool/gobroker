@@ -8,6 +8,8 @@ import (
 	"net/http"
 )
 
+const rootPath = "http://localhost:8080"
+
 var GrossDispatcher Dispatcher
 var landingTempl *template.Template
 
