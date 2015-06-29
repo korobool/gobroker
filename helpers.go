@@ -34,3 +34,10 @@ func getPlatform(uaHeader string) string {
 	return PlatformOther
 
 }
+
+func getDeviceType(platform string) string {
+	if platform == PlatformOther {
+		return "pc"
+	}
+	return "mobile"
+}

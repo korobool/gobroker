@@ -233,7 +233,6 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		identity := binary.LittleEndian.Uint32([]byte(msg[0][1:]))
 
 		fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
-		//fmt.Printf("!!!!!!!!!!!!!", d.ids)
 
 		cmd := msg[1]
 		if cmd == PROTO_READY {
@@ -242,10 +241,6 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			}
 
 			d.addWorker(identity, msg)
-
-			// buf := new(bytes.Buffer)
-			// buf.WriteByte(0x0)
-			// err = binary.Write(buf, binary.LittleEndian, identity)
 
 			strIdentity := identityIntToString(identity)
 
@@ -259,22 +254,11 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			d.workers[identity].kaLast = time.Now().Unix()
 			d.workers[identity].kaFailed = 0
 
-			// TODO: this is done in one-client-mode just for protocol debugging. Implement it.
-			// time.Sleep(time.Second)
-
-			// buf := new(bytes.Buffer)
-			// buf.WriteByte(0x0)
-			// err = binary.Write(buf, binary.LittleEndian, identity)
-
-			// strIdentity := identityIntToString(identity)
-
 			if err != nil {
 				fmt.Println("Error while prapring message")
 			}
-			// d.zmqSocket.SendMessage(strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId))
 		}
 		if msg[1] == PROTO_DONE {
-			//fmt.Println("msg[1]: PROTO_DONE")
 			if len(msg) < 3 {
 				return errors.New("Malformed message")
 			}
@@ -284,27 +268,10 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			}
 
 			if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
-				//fmt.Println("IN DONE!!!!!!")
 				task.chResult <- msg[3]
 			}
 
 		}
-
-		// 	} else if len(msg) == 3 {
-		// 		if msg[0] == PROTO_TASK {
-		// 			ok := queue.Put(taskqueue.Task{msg[1], msg[2]})
-		// 			if ok {
-		// 				go func(ch chan<- struct{}) { ch <- struct{}{} }(ch_task)
-		// 				worker.SendMessage(PROTO_ACK, msg[1], PROTO_TASK)
-		// 			} else {
-		// 				worker.SendMessage(PROTO_NACK, msg[1], PROTO_TASK)
-		// 			}
-		// 		}
-		// 	} else if len(msg) == 2 {
-		// 		if msg[0] == PROTO_CANCEL {
-		// 			go func(ch chan<- string, msg string) { ch <- msg }(ch_cancel, msg[1])
-		// 		}
-		// 	}
 	}
 	return nil
 }
@@ -358,11 +325,6 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 		workerIdentity: bestWorker,
 	}
 	d.workers[bestWorker].tasks = append(d.workers[bestWorker].tasks, taskId)
-
-	// Build and send message with type TASK using zmq writing loop
-	// buf := new(bytes.Buffer)
-	// buf.WriteByte(0x0)
-	// err = binary.Write(buf, binary.LittleEndian, identity)
 
 	strIdentity := identityIntToString(bestWorker)
 

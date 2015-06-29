@@ -8,11 +8,13 @@ import (
 	// "github.com/mssola/user_agent"
 	//"github.com/varstr/uaparser"
 	"net/http"
+	"strings"
 	"time"
 )
 
 const (
-	HashLength = 20
+	HashLength     = 20
+	DefaultTimeout = time.Second * 1
 )
 
 type ApiMessage struct {
@@ -39,14 +41,14 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 	expandJson, err := GrossDispatcher.RemoteCall(
 		"expand",
 		string(params),
-		time.Second*4,
+		DefaultTimeout,
 	)
 
 	// TODO: validate expandJson for
 
 	var data struct {
-		App_id string `json:"app_id"`
-		Urls   struct {
+		AppId string `json:"app_id"`
+		Urls  struct {
 			Android string `json:"android"`
 			Apple   string `json:"apple"`
 		} `json:"urls"`
@@ -58,21 +60,46 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("REMOTE CALL TIMEOUT")
 	}
 
+	if data.AppId == "" {
+		// w.WriteHeader(http.NotFound(w, r)) // TODO: add "not found" page
+		http.NotFound(w, r)
+		return
+	}
+
 	platform := getPlatform(r.UserAgent())
+
+	statistics := struct {
+		AppId    string `json:"app_id"`
+		Link     string `json:"link"`
+		IP       string `json:"ip"`
+		UA       string `json:"user_agent"`
+		Time     string `json:"time"`
+		Hash     string `json:"hash"`
+		Platform string `json:"platform"`
+		LinkType string `json:"link_type"`
+	}{
+		AppId:    data.AppId,
+		Link:     r.RequestURI,
+		IP:       strings.Split(r.RemoteAddr, ":")[0],
+		UA:       r.UserAgent(),
+		Time:     time.Now().Format(time.RFC3339),
+		Hash:     hash,
+		Platform: getDeviceType(platform),
+		LinkType: "redirect",
+	}
+
+	params, _ = json.Marshal(statistics)
+
+	GrossDispatcher.RemoteCall("open_commit", string(params), DefaultTimeout)
 
 	if platform == PlatformAndroid {
 		url := data.Urls.Android
 		http.Redirect(w, r, url, http.StatusFound)
-
-	}
-
-	if platform == PlatformIPhone {
+	} else if platform == PlatformIPhone {
 		url := data.Urls.Apple
 		http.Redirect(w, r, url, http.StatusFound)
-	}
-
-	if platform == PlatformOther {
-		w.WriteHeader(http.StatusForbidden)
+	} else {
+		w.WriteHeader(http.StatusForbidden) // TODO: add forbidden page
 	}
 
 }
