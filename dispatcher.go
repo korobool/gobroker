@@ -12,7 +12,7 @@ import (
 
 const (
 	MaxWorkers           = 16
-	PollInterval         = 1000 * time.Microsecond
+	PollInterval         = 500 * time.Microsecond
 	AliveTimeout         = 2
 	MaxKAFailed          = 2
 	HeartbeatingInterval = 1 * time.Second
@@ -82,7 +82,7 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 		zmqPoller: zmqPoller,
 		locks:     Locks{workers: new(sync.RWMutex), socket: new(sync.Mutex), tasks: new(sync.Mutex)},
 		tasks:     make(map[TaskId]*Task),
-		//outboundMsgs: make(chan []string, 100),
+		//outboundMsgs: make(chan []string, 10),
 		outboundMsgs: make(chan []string),
 		workers:      make(map[uint32]*WorkerInfo),
 		methods:      make(map[string][]uint32),
@@ -220,9 +220,9 @@ func (d *Dispatcher) takeWorkerId(workerType string) (uint8, error) {
 func (d *Dispatcher) sendToOutbound(msg []string) {
 	select {
 	case d.outboundMsgs <- msg:
-		fmt.Println(">>>sendToOutbound:", msg)
+		//fmt.Println(">>>sendToOutbound:", msg)
 	case <-time.After(time.Second * 10):
-		fmt.Println("sendToOutbound: failed by timeout")
+		//fmt.Println("sendToOutbound: failed by timeout")
 	}
 }
 
@@ -288,18 +288,16 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		//for exitSelect := false; !exitSelect; {
 		//	select {
 		//	case msg := <-d.outboundMsgs:
-		//		fmt.Println("<<<ZmqLoop: SENDING", msg)
 		//		d.zmqSocket.SendMessage(msg)
-		//		fmt.Println(">>>>ZmqLoop: SENT", msg)
+		//		fmt.Println(">>>>ZmqLoop [SENT]:", msg)
 		//	default:
-		//		//fmt.Println(">>>>SEND default")
 		//		exitSelect = true
 		//	}
 		//}
 		select {
 		case msg := <-d.outboundMsgs:
 			d.zmqSocket.SendMessage(msg)
-			fmt.Println(">>>>ZmqLoop [SENT]:", msg)
+			//fmt.Println(">>>>ZmqLoop [SENT]:", msg)
 		default:
 		}
 
@@ -312,7 +310,7 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			continue
 		}
 
-		msg, err := d.zmqSocket.RecvMessage(0)
+		msg, err := d.zmqSocket.RecvMessage(zmq.DONTWAIT)
 		d.processInbound(msg)
 
 		if err != nil {
