@@ -164,7 +164,7 @@ func (d *Dispatcher) removeTasks(taskIds []TaskId) {
 	defer d.locks.tasks.Unlock()
 
 	for _, taskId := range taskIds {
-		close(d.tasks[taskId].chResult)
+		//close(d.tasks[taskId].chResult)
 		delete(d.tasks, taskId)
 	}
 }
@@ -219,7 +219,7 @@ func (d *Dispatcher) takeWorkerId(workerType string) (uint8, error) {
 func (d *Dispatcher) sendToOutbound(msg []string) {
 	select {
 	case d.outboundMsgs <- msg:
-		fmt.Println(">>>send msg:", msg)
+		fmt.Println(">>>sendToOutbound:", msg)
 	case <-time.After(time.Second * 5):
 		fmt.Println("sendToOutbound: failed by timeout")
 	}
@@ -230,8 +230,9 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		for exitSelect := false; !exitSelect; {
 			select {
 			case msg := <-d.outboundMsgs:
+				fmt.Println("<<<ZmqLoop: SENDING", msg)
 				d.zmqSocket.SendMessage(msg)
-				//fmt.Println(">>>>SEND")
+				fmt.Println(">>>>ZmqLoop: SENT", msg)
 			default:
 				//fmt.Println(">>>>SEND default")
 				exitSelect = true
@@ -258,7 +259,7 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		// Ugly 4 bytes to int32 conversion (msg[0][1:] has length 4)
 		identity := binary.LittleEndian.Uint32([]byte(msg[0][1:]))
 
-		fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
+		//fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
 
 		cmd := msg[1]
 		if cmd == PROTO_READY {
@@ -303,14 +304,13 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			}
 
 			d.locks.tasks.Lock()
-			defer d.locks.tasks.Unlock()
-
 			if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
 				if task.chResult == nil {
 					return errors.New("result channel closed")
 				}
 				task.chResult <- msg[3]
 			}
+			d.locks.tasks.Unlock()
 
 		}
 	}
@@ -370,6 +370,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	taskId := TaskId{bestWorker, taskUUID}
 	// add Task to d.tsasks
 	// TODO: add check if _, ok := d.tasks[taskUuid]; !ok .......
+
 	d.locks.tasks.Lock()
 	d.tasks[taskId] = &Task{
 		chResult:       chResult,
@@ -379,7 +380,6 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	d.locks.tasks.Unlock()
 
 	strIdentity := identityIntToString(bestWorker)
-
 	//d.outboundMsgs <- []string{
 	//	strIdentity,
 	//	PROTO_TASK,
@@ -387,7 +387,6 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	//	msg.method,
 	//  msg.params,
 	//}
-
 	taskMsg := []string{
 		strIdentity,
 		PROTO_TASK,
@@ -398,7 +397,6 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	go d.sendToOutbound(taskMsg)
 
 	// setup cahanel listener for response with timeout
-
 	// TODO: Check chanels for existance etc.
 	select {
 	case response := <-chResult:
