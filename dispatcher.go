@@ -11,17 +11,15 @@ import (
 )
 
 const (
+	OutBufferSize        = 10
 	MaxWorkers           = 16
-	PollInterval         = 500 * time.Microsecond
+	PollInterval         = 100 * time.Microsecond
 	AliveTimeout         = 2
 	MaxKAFailed          = 2
 	HeartbeatingInterval = 1 * time.Second
 	WorkerMaxTasks       = 100
+	ExecuteTimeout       = 2 * time.Second
 )
-
-// type WorkerMsg struct {
-// 	Value string
-// }
 
 type WorkerInfo struct {
 	workerId   uint8
@@ -61,10 +59,7 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(uri string) (*Dispatcher, error) {
-	//context, err := zmq.NewContext()
-	//if err != nil {
-	//	return nil, err
-	//}
+
 	zmqSocket, err := zmq.NewSocket(zmq.ROUTER)
 	if err != nil {
 		return nil, err
@@ -78,22 +73,21 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	zmqPoller.Add(zmqSocket, zmq.POLLIN)
 
 	return &Dispatcher{
-		zmqSocket: zmqSocket,
-		zmqPoller: zmqPoller,
-		locks:     Locks{workers: new(sync.RWMutex), socket: new(sync.Mutex), tasks: new(sync.Mutex)},
-		tasks:     make(map[TaskId]*Task),
-		//outboundMsgs: make(chan []string, 10),
-		outboundMsgs: make(chan []string),
-		workers:      make(map[uint32]*WorkerInfo),
-		methods:      make(map[string][]uint32),
-		ids:          map[string][MaxWorkers]bool{},
+		zmqSocket:    zmqSocket,
+		zmqPoller:    zmqPoller,
+		locks:        Locks{workers: new(sync.RWMutex), tasks: new(sync.Mutex)},
+		tasks:        make(map[TaskId]*Task),
+		outboundMsgs: make(chan []string, OutBufferSize),
+		//outboundMsgs: make(chan []string),
+		workers: make(map[uint32]*WorkerInfo),
+		methods: make(map[string][]uint32),
+		ids:     map[string][MaxWorkers]bool{},
 	}, err
 }
 
 func (d *Dispatcher) run() {
 	// Starting zeromq loop
-	go d.ZmqReadLoopRun()
-	//go d.ZmqWriteLoopRun()
+	go d.ZmqLoopRun()
 	go d.HeartbeatingRun()
 }
 
@@ -113,9 +107,10 @@ func (d *Dispatcher) HeartbeatingRun() {
 				}
 			}
 			strIdentity := identityIntToString(identity)
-			//d.outboundMsgs <- []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
+
 			kaMsg := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
-			go d.sendToOutbound(kaMsg)
+
+			go d.sendToOutbound(kaMsg, DefaultTimeout)
 
 		}
 		for _, id := range removeList {
@@ -217,12 +212,10 @@ func (d *Dispatcher) takeWorkerId(workerType string) (uint8, error) {
 	return 0, errors.New("No free woker id")
 }
 
-func (d *Dispatcher) sendToOutbound(msg []string) {
+func (d *Dispatcher) sendToOutbound(msg []string, timeout time.Duration) {
 	select {
 	case d.outboundMsgs <- msg:
-		//fmt.Println(">>>sendToOutbound:", msg)
-	case <-time.After(time.Second * 10):
-		//fmt.Println("sendToOutbound: failed by timeout")
+	case <-time.After(timeout):
 	}
 }
 
@@ -247,8 +240,8 @@ func (d *Dispatcher) processInbound(msg []string) error {
 		strIdentity := identityIntToString(identity)
 
 		firstValuebleKA := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId)}
-		//d.outboundMsgs <- firstValuebleKA
-		go d.sendToOutbound(firstValuebleKA)
+
+		go d.sendToOutbound(firstValuebleKA, DefaultTimeout)
 	}
 
 	// TODO: We need to ignore all the messages from workers with unnkown identity
@@ -283,25 +276,25 @@ func (d *Dispatcher) processInbound(msg []string) error {
 	return nil
 }
 
-func (d *Dispatcher) ZmqReadLoopRun() error {
-	for {
-		//for exitSelect := false; !exitSelect; {
-		//	select {
-		//	case msg := <-d.outboundMsgs:
-		//		d.zmqSocket.SendMessage(msg)
-		//		fmt.Println(">>>>ZmqLoop [SENT]:", msg)
-		//	default:
-		//		exitSelect = true
-		//	}
+func (d *Dispatcher) ZmqLoopRun() error {
+
+	for _ = range time.Tick(PollInterval) {
+		//select {
+		//case msg := <-d.outboundMsgs:
+		//	d.zmqSocket.SendMessage(msg)
+		//default:
 		//}
-		select {
-		case msg := <-d.outboundMsgs:
-			d.zmqSocket.SendMessage(msg)
-			//fmt.Println(">>>>ZmqLoop [SENT]:", msg)
-		default:
+
+		for exitSelect := false; !exitSelect; {
+			select {
+			case msg := <-d.outboundMsgs:
+				d.zmqSocket.SendMessage(msg)
+			default:
+				exitSelect = true
+			}
 		}
 
-		sockets, err := d.zmqPoller.Poll(PollInterval)
+		sockets, err := d.zmqPoller.Poll(0)
 		if err != nil {
 			fmt.Println(err)
 			return err //  Interrupted
@@ -314,24 +307,11 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		d.processInbound(msg)
 
 		if err != nil {
-			fmt.Println(">>>ZmqLoop: RecvMessage FAILED!")
+			fmt.Println(">>> ZmqLoop: RecvMessage FAILED!")
 			return err
 		}
 	}
 	return nil
-}
-
-func (d *Dispatcher) ZmqWriteLoopRun() {
-	for {
-		select {
-		case msg := <-d.outboundMsgs:
-			d.locks.socket.Lock()
-			d.zmqSocket.SendMessage(msg)
-			d.locks.socket.Unlock()
-		case <-time.After(time.Second * 10):
-			fmt.Println("ZmqWriteLoopRun: timeout")
-		}
-	}
 }
 
 func (d *Dispatcher) getBestWorker(methodName string) (uint32, error) {
@@ -358,8 +338,8 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	//fmt.Println("ExecuteMethod:", msg)
 
 	// TODO: validations and errors
-	// Select a worker
 
+	// Select a worker
 	bestWorker, err := d.getBestWorker(msg.method)
 	if err != nil {
 		fmt.Println(err)
@@ -384,13 +364,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	d.locks.tasks.Unlock()
 
 	strIdentity := identityIntToString(bestWorker)
-	//d.outboundMsgs <- []string{
-	//	strIdentity,
-	//	PROTO_TASK,
-	//	taskUUID.String(),
-	//	msg.method,
-	//  msg.params,
-	//}
+
 	taskMsg := []string{
 		strIdentity,
 		PROTO_TASK,
@@ -398,7 +372,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 		msg.method,
 		msg.params,
 	}
-	go d.sendToOutbound(taskMsg)
+	go d.sendToOutbound(taskMsg, ExecuteTimeout)
 
 	// setup cahanel listener for response with timeout
 	// TODO: Check chanels for existance etc.
@@ -407,7 +381,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 		//fmt.Printf("ExecuteMethod got result %s", response)
 		chResponse <- response
 		//fmt.Println("ExecuteMethod write response")
-	case <-time.After(time.Second * 2):
+	case <-time.After(ExecuteTimeout):
 		d.removeTasks([]TaskId{taskId})
 		fmt.Println("ExecuteMethod timeout")
 	}
