@@ -225,8 +225,8 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		msg, err := d.zmqSocket.RecvMessage(0)
 		d.locks.socket.Unlock()
 		if err != nil {
-			break
 			fmt.Println("ZmqReadLoopRun FAILED!")
+			break
 		}
 
 		// Ugly 4 bytes to int32 conversion (msg[0][1:] has length 4)
@@ -253,6 +253,10 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 		}
 
 		// TODO: We need to ignore all the messages from workers with unnkown identity
+		if _, ok := d.workers[identity]; !ok {
+			fmt.Println(">>>>Unkown identity", msg)
+			continue
+		}
 
 		if msg[1] == PROTO_KA {
 			d.workers[identity].kaLast = time.Now().Unix()
