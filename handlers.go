@@ -57,6 +57,11 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 		string(params),
 		DefaultTimeout,
 	)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
+		return
+	}
 
 	// TODO: validate expandJSON for
 
@@ -69,9 +74,10 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = json.Unmarshal([]byte(expandJSON), &data)
-
 	if err != nil {
-		fmt.Println("REMOTE CALL TIMEOUT")
+		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	if data.AppId == "" {
@@ -94,7 +100,10 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 	params, _ = json.Marshal(statistics)
 
-	GrossDispatcher.RemoteCall("open_commit", string(params), DefaultTimeout)
+	_, err = GrossDispatcher.RemoteCall("open_commit", string(params), DefaultTimeout)
+	if err != nil {
+		fmt.Println(err)
+	}
 
 	if platform == PlatformAndroid {
 		url := data.Urls.Android

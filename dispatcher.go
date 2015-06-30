@@ -12,10 +12,11 @@ import (
 
 const (
 	MaxWorkers           = 16
-	PollInterval         = 1000 * time.Millisecond
+	PollInterval         = 10 * time.Millisecond
 	AliveTimeout         = 2
 	MaxKAFailed          = 2
 	HeartbeatingInterval = 1 * time.Second
+	WorkerMaxTasks       = 100
 )
 
 // type WorkerMsg struct {
@@ -43,6 +44,7 @@ type Task struct {
 type Locks struct {
 	workers *sync.RWMutex
 	socket  *sync.Mutex
+	tasks   *sync.Mutex
 }
 
 type Dispatcher struct {
@@ -78,9 +80,9 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	return &Dispatcher{
 		zmqSocket:    zmqSocket,
 		zmqPoller:    zmqPoller,
-		locks:        Locks{workers: new(sync.RWMutex), socket: new(sync.Mutex)},
+		locks:        Locks{workers: new(sync.RWMutex), socket: new(sync.Mutex), tasks: new(sync.Mutex)},
 		tasks:        make(map[TaskId]*Task),
-		outboundMsgs: make(chan []string),
+		outboundMsgs: make(chan []string, 100),
 		workers:      make(map[uint32]*WorkerInfo),
 		methods:      make(map[string][]uint32),
 		ids:          map[string][MaxWorkers]bool{},
@@ -90,7 +92,7 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 func (d *Dispatcher) run() {
 	// Starting zeromq loop
 	go d.ZmqReadLoopRun()
-	go d.ZmqWriteLoopRun()
+	//go d.ZmqWriteLoopRun()
 	go d.HeartbeatingRun()
 }
 
@@ -110,7 +112,10 @@ func (d *Dispatcher) HeartbeatingRun() {
 				}
 			}
 			strIdentity := identityIntToString(identity)
-			d.outboundMsgs <- []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
+			//d.outboundMsgs <- []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
+			kaMsg := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
+			go d.sendToOutbound(kaMsg)
+
 		}
 		for _, id := range removeList {
 			d.removeWorker(id)
@@ -155,6 +160,9 @@ func (d *Dispatcher) addWorker(identity uint32, msg []string) error {
 }
 
 func (d *Dispatcher) removeTasks(taskIds []TaskId) {
+	d.locks.tasks.Lock()
+	defer d.locks.tasks.Unlock()
+
 	for _, taskId := range taskIds {
 		close(d.tasks[taskId].chResult)
 		delete(d.tasks, taskId)
@@ -208,24 +216,42 @@ func (d *Dispatcher) takeWorkerId(workerType string) (uint8, error) {
 	return 0, errors.New("No free woker id")
 }
 
+func (d *Dispatcher) sendToOutbound(msg []string) {
+	select {
+	case d.outboundMsgs <- msg:
+		fmt.Println(">>>send msg:", msg)
+	case <-time.After(time.Second * 5):
+		fmt.Println("sendToOutbound: failed by timeout")
+	}
+}
+
 func (d *Dispatcher) ZmqReadLoopRun() error {
 	for {
+		for exitSelect := false; !exitSelect; {
+			select {
+			case msg := <-d.outboundMsgs:
+				d.zmqSocket.SendMessage(msg)
+				//fmt.Println(">>>>SEND")
+			default:
+				//fmt.Println(">>>>SEND default")
+				exitSelect = true
+			}
+		}
 
 		sockets, err := d.zmqPoller.Poll(PollInterval)
 		if err != nil {
-			fmt.Println(sockets)
+			fmt.Println(err)
 			break //  Interrupted
 		}
-
 		if len(sockets) != 1 {
 			continue
 		}
 
-		d.locks.socket.Lock()
+		//d.locks.socket.Lock()
 		msg, err := d.zmqSocket.RecvMessage(0)
-		d.locks.socket.Unlock()
+		//d.locks.socket.Unlock()
 		if err != nil {
-			fmt.Println("ZmqReadLoopRun FAILED!")
+			fmt.Println("ZmqReadLoopRun: RecvMessage FAILED!")
 			break
 		}
 
@@ -249,12 +275,13 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 			strIdentity := identityIntToString(identity)
 
 			firstValuebleKA := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId)}
-			d.outboundMsgs <- firstValuebleKA
+			//d.outboundMsgs <- firstValuebleKA
+			go d.sendToOutbound(firstValuebleKA)
 		}
 
 		// TODO: We need to ignore all the messages from workers with unnkown identity
 		if _, ok := d.workers[identity]; !ok {
-			fmt.Println(">>>>Unkown identity", msg)
+			fmt.Println(">>>>Unknown identity", msg)
 			continue
 		}
 
@@ -275,7 +302,13 @@ func (d *Dispatcher) ZmqReadLoopRun() error {
 				return errors.New("Wrong UUID in message")
 			}
 
+			d.locks.tasks.Lock()
+			defer d.locks.tasks.Unlock()
+
 			if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
+				if task.chResult == nil {
+					return errors.New("result channel closed")
+				}
 				task.chResult <- msg[3]
 			}
 
@@ -311,14 +344,14 @@ func (d *Dispatcher) getBestWorker(methodName string) (uint32, error) {
 		}
 	}
 
-	if len(candidates) == 0 {
+	if len(candidates) == 0 || len(candidates) > WorkerMaxTasks {
 		return 0, errors.New("No free workers avaliable")
 	}
 	return candidates[idx], nil
 }
 
 func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
-	fmt.Println("ExecuteMethod:", msg)
+	//fmt.Println("ExecuteMethod:", msg)
 
 	// TODO: validations and errors
 	// Select a worker
@@ -337,30 +370,41 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	taskId := TaskId{bestWorker, taskUUID}
 	// add Task to d.tsasks
 	// TODO: add check if _, ok := d.tasks[taskUuid]; !ok .......
+	d.locks.tasks.Lock()
 	d.tasks[taskId] = &Task{
 		chResult:       chResult,
 		workerIdentity: bestWorker,
 	}
 	d.workers[bestWorker].tasks = append(d.workers[bestWorker].tasks, taskId)
+	d.locks.tasks.Unlock()
 
 	strIdentity := identityIntToString(bestWorker)
 
-	d.outboundMsgs <- []string{
+	//d.outboundMsgs <- []string{
+	//	strIdentity,
+	//	PROTO_TASK,
+	//	taskUUID.String(),
+	//	msg.method,
+	//  msg.params,
+	//}
+
+	taskMsg := []string{
 		strIdentity,
 		PROTO_TASK,
 		taskUUID.String(),
 		msg.method,
 		msg.params,
 	}
+	go d.sendToOutbound(taskMsg)
 
 	// setup cahanel listener for response with timeout
 
 	// TODO: Check chanels for existance etc.
 	select {
 	case response := <-chResult:
-		fmt.Printf("ExecuteMethod got result %s", response)
+		//fmt.Printf("ExecuteMethod got result %s", response)
 		chResponse <- response
-		fmt.Println("ExecuteMethod write response")
+		//fmt.Println("ExecuteMethod write response")
 	case <-time.After(time.Second * 2):
 		d.removeTasks([]TaskId{taskId})
 		fmt.Println("ExecuteMethod timeout")
