@@ -12,7 +12,7 @@ import (
 
 const (
 	MaxWorkers           = 16
-	PollInterval         = 10 * time.Millisecond
+	PollInterval         = 1000 * time.Microsecond
 	AliveTimeout         = 2
 	MaxKAFailed          = 2
 	HeartbeatingInterval = 1 * time.Second
@@ -78,11 +78,12 @@ func NewDispatcher(uri string) (*Dispatcher, error) {
 	zmqPoller.Add(zmqSocket, zmq.POLLIN)
 
 	return &Dispatcher{
-		zmqSocket:    zmqSocket,
-		zmqPoller:    zmqPoller,
-		locks:        Locks{workers: new(sync.RWMutex), socket: new(sync.Mutex), tasks: new(sync.Mutex)},
-		tasks:        make(map[TaskId]*Task),
-		outboundMsgs: make(chan []string, 100),
+		zmqSocket: zmqSocket,
+		zmqPoller: zmqPoller,
+		locks:     Locks{workers: new(sync.RWMutex), socket: new(sync.Mutex), tasks: new(sync.Mutex)},
+		tasks:     make(map[TaskId]*Task),
+		//outboundMsgs: make(chan []string, 100),
+		outboundMsgs: make(chan []string),
 		workers:      make(map[uint32]*WorkerInfo),
 		methods:      make(map[string][]uint32),
 		ids:          map[string][MaxWorkers]bool{},
@@ -220,98 +221,103 @@ func (d *Dispatcher) sendToOutbound(msg []string) {
 	select {
 	case d.outboundMsgs <- msg:
 		fmt.Println(">>>sendToOutbound:", msg)
-	case <-time.After(time.Second * 5):
+	case <-time.After(time.Second * 10):
 		fmt.Println("sendToOutbound: failed by timeout")
 	}
 }
 
+func (d *Dispatcher) processInbound(msg []string) error {
+
+	// Ugly 4 bytes to int32 conversion (msg[0][1:] has length 4)
+	identity := binary.LittleEndian.Uint32([]byte(msg[0][1:]))
+
+	//fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
+
+	cmd := msg[1]
+	if cmd == PROTO_READY {
+		if _, ok := d.workers[identity]; ok {
+			d.removeWorker(identity)
+		}
+		err := d.addWorker(identity, msg)
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+
+		strIdentity := identityIntToString(identity)
+
+		firstValuebleKA := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId)}
+		//d.outboundMsgs <- firstValuebleKA
+		go d.sendToOutbound(firstValuebleKA)
+	}
+
+	// TODO: We need to ignore all the messages from workers with unnkown identity
+	if _, ok := d.workers[identity]; !ok {
+		fmt.Println("Unknown identity: ", identity)
+		return nil
+	}
+
+	if msg[1] == PROTO_KA {
+		d.workers[identity].kaLast = time.Now().Unix()
+		d.workers[identity].kaFailed = 0
+	}
+	if msg[1] == PROTO_DONE {
+		if len(msg) < 3 {
+			return errors.New("Malformed message")
+		}
+		taskUUID, err := uuid.FromString(msg[2])
+		if err != nil {
+			return errors.New("Wrong UUID in message")
+		}
+
+		//d.locks.tasks.Lock()
+		if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
+			//if task.chResult == nil {
+			//	return errors.New("Result channel closed")
+			//}
+			go func() { task.chResult <- msg[3] }()
+
+		}
+		//d.locks.tasks.Unlock()
+	}
+	return nil
+}
+
 func (d *Dispatcher) ZmqReadLoopRun() error {
 	for {
-		for exitSelect := false; !exitSelect; {
-			select {
-			case msg := <-d.outboundMsgs:
-				fmt.Println("<<<ZmqLoop: SENDING", msg)
-				d.zmqSocket.SendMessage(msg)
-				fmt.Println(">>>>ZmqLoop: SENT", msg)
-			default:
-				//fmt.Println(">>>>SEND default")
-				exitSelect = true
-			}
+		//for exitSelect := false; !exitSelect; {
+		//	select {
+		//	case msg := <-d.outboundMsgs:
+		//		fmt.Println("<<<ZmqLoop: SENDING", msg)
+		//		d.zmqSocket.SendMessage(msg)
+		//		fmt.Println(">>>>ZmqLoop: SENT", msg)
+		//	default:
+		//		//fmt.Println(">>>>SEND default")
+		//		exitSelect = true
+		//	}
+		//}
+		select {
+		case msg := <-d.outboundMsgs:
+			d.zmqSocket.SendMessage(msg)
+			fmt.Println(">>>>ZmqLoop [SENT]:", msg)
+		default:
 		}
 
 		sockets, err := d.zmqPoller.Poll(PollInterval)
 		if err != nil {
 			fmt.Println(err)
-			break //  Interrupted
+			return err //  Interrupted
 		}
 		if len(sockets) != 1 {
 			continue
 		}
 
-		//d.locks.socket.Lock()
 		msg, err := d.zmqSocket.RecvMessage(0)
-		//d.locks.socket.Unlock()
+		d.processInbound(msg)
+
 		if err != nil {
-			fmt.Println("ZmqReadLoopRun: RecvMessage FAILED!")
-			break
-		}
-
-		// Ugly 4 bytes to int32 conversion (msg[0][1:] has length 4)
-		identity := binary.LittleEndian.Uint32([]byte(msg[0][1:]))
-
-		//fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
-
-		cmd := msg[1]
-		if cmd == PROTO_READY {
-			if _, ok := d.workers[identity]; ok {
-				d.removeWorker(identity)
-			}
-
-			err = d.addWorker(identity, msg)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-
-			strIdentity := identityIntToString(identity)
-
-			firstValuebleKA := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId)}
-			//d.outboundMsgs <- firstValuebleKA
-			go d.sendToOutbound(firstValuebleKA)
-		}
-
-		// TODO: We need to ignore all the messages from workers with unnkown identity
-		if _, ok := d.workers[identity]; !ok {
-			fmt.Println(">>>>Unknown identity", msg)
-			continue
-		}
-
-		if msg[1] == PROTO_KA {
-			d.workers[identity].kaLast = time.Now().Unix()
-			d.workers[identity].kaFailed = 0
-
-			if err != nil {
-				fmt.Println("Error while prapring message")
-			}
-		}
-		if msg[1] == PROTO_DONE {
-			if len(msg) < 3 {
-				return errors.New("Malformed message")
-			}
-			taskUUID, err := uuid.FromString(msg[2])
-			if err != nil {
-				return errors.New("Wrong UUID in message")
-			}
-
-			d.locks.tasks.Lock()
-			if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
-				if task.chResult == nil {
-					return errors.New("result channel closed")
-				}
-				task.chResult <- msg[3]
-			}
-			d.locks.tasks.Unlock()
-
+			fmt.Println(">>>ZmqLoop: RecvMessage FAILED!")
+			return err
 		}
 	}
 	return nil
@@ -358,8 +364,8 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 
 	bestWorker, err := d.getBestWorker(msg.method)
 	if err != nil {
-		close(chResponse)
 		fmt.Println(err)
+		close(chResponse)
 		return
 	}
 
@@ -413,7 +419,6 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 func (d *Dispatcher) RemoteCall(methodName string, params string, timeout time.Duration) (string, error) {
 
 	var err error = nil
-	// var result string
 
 	chResult := make(chan string)
 
