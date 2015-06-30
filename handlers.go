@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/gorilla/mux"
 	"net/http"
-	"strconv"
+	//"strconv"
 	"strings"
 	"time"
 )
@@ -16,12 +16,23 @@ const (
 	AppIdLength    = 15
 	DefaultTimeout = time.Second * 1
 	ApiKeyHeader   = "X-API-KEY"
-	DomainHeader   = "Host"
+	DomainHeader   = "X-Host"
 )
 
 type ApiMessage struct {
 	method string
 	params string
+}
+
+type StatMessage struct {
+	AppId    string `json:"app_id"`
+	Link     string `json:"link"`
+	IP       string `json:"ip"`
+	UA       string `json:"user_agent"`
+	Time     string `json:"time"`
+	Hash     string `json:"hash"`
+	Platform string `json:"platform"`
+	LinkType string `json:"link_type"`
 }
 
 func Redirect(w http.ResponseWriter, r *http.Request) {
@@ -70,16 +81,7 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 	platform := getPlatform(r.UserAgent())
 
-	statistics := struct {
-		AppId    string `json:"app_id"`
-		Link     string `json:"link"`
-		IP       string `json:"ip"`
-		UA       string `json:"user_agent"`
-		Time     string `json:"time"`
-		Hash     string `json:"hash"`
-		Platform string `json:"platform"`
-		LinkType string `json:"link_type"`
-	}{
+	statistics := StatMessage{
 		AppId:    data.AppId,
 		Link:     r.RequestURI,
 		IP:       strings.Split(r.RemoteAddr, ":")[0],
@@ -106,7 +108,7 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func checkAuth(authHeader string) (int, error) {
+func checkAuth(authHeader string) (string, error) {
 	msg := struct {
 		ApiKey string `json:"api_key"`
 	}{authHeader}
@@ -119,27 +121,34 @@ func checkAuth(authHeader string) (int, error) {
 		DefaultTimeout,
 	)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	var data struct {
+		//WORKAROUND: recieving customer_id as int from Auth-worker
 		CustomerId string `json:"customer_id"`
 	}
 
 	err = json.Unmarshal([]byte(customerJSON), &data)
 
-	//WORKAROUND: recieving customer_id as string from Auth-worker
-	customer, _ := strconv.Atoi(data.CustomerId)
-	if customer == 0 {
-		return 0, errors.New("No such API key")
+	//WORKAROUND: recieving customer_id as int from Auth-worker
+	//customer := strconv.Itoa(data.CustomerId)
+	if data.CustomerId == "" {
+		return "", errors.New("No such API key")
 	}
 
-	return customer, nil
+	return data.CustomerId, nil
 }
 
-func checkAppId(appId string, customerId int) error {
+func checkAppId(appId string, customerId string) error {
+	//WORKAROUND: recieving customer_id as int from Auth-worker
+	//customer, _ := strconv.Atoi(customerId)
+
+	fmt.Println("customerId>>>>>", customerId)
+
 	msg := struct {
-		CustomerId int `json:"customer_id"`
+		CustomerId string `json:"customer_id"`
+		//WORKAROUND: recieving customer_id as int from Auth-worker
 	}{customerId}
 
 	params, _ := json.Marshal(msg)
@@ -243,14 +252,23 @@ func AppShare(w http.ResponseWriter, r *http.Request) {
 	err = json.Unmarshal([]byte(infoJSON), &infoResult)
 
 	data := struct {
-		CustomerId int        `json:"customer_id"`
-		Domain     string     `json:"domain"`
-		Urls       InfoResult `json:"urls"`
+		CustomerId string `json:"customer_id"`
+		AppId      string `json:"app_id"`
+		Domain     string `json:"domain"`
+		Urls       struct {
+			Apple   string `json:"apple"`
+			Android string `json:"android"`
+		} `json:"urls"`
 	}{
 		customerId,
+		appId,
 		r.Header.Get(DomainHeader),
-		infoResult,
+		struct {
+			Apple   string `json:"apple"`
+			Android string `json:"android"`
+		}{infoResult.UrlApple, infoResult.UrlAndroid},
 	}
+
 	params, _ = json.Marshal(data)
 
 	shortenJSON, _ := GrossDispatcher.RemoteCall("shorten", string(params), DefaultTimeout)
@@ -371,4 +389,19 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+
+	statistics := StatMessage{
+		AppId:    data.AppId,
+		Link:     r.RequestURI,
+		IP:       strings.Split(r.RemoteAddr, ":")[0],
+		UA:       r.UserAgent(),
+		Time:     time.Now().Format(time.RFC3339),
+		Hash:     hash,
+		Platform: getDeviceType(platform),
+		LinkType: "landing",
+	}
+
+	params, _ = json.Marshal(statistics)
+
+	GrossDispatcher.RemoteCall("open_commit", string(params), DefaultTimeout)
 }
