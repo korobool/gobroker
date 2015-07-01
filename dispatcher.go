@@ -17,7 +17,7 @@ const (
 	AliveTimeout         = 2
 	MaxKAFailed          = 2
 	HeartbeatingInterval = 1 * time.Second
-	WorkerMaxTasks       = 100
+	WorkerMaxTasks       = 200
 	ExecuteTimeout       = 2 * time.Second
 )
 
@@ -95,6 +95,12 @@ func (d *Dispatcher) HeartbeatingRun() {
 	for {
 
 		removeList := []uint32{}
+
+		fmt.Println("==================")
+		for i, w := range d.workers {
+			fmt.Printf(">>>worker: [%d] <%s:%d> >>> %d\n", i, w.workerType, w.workerId, len(w.tasks))
+		}
+		fmt.Println("==================")
 
 		now := time.Now().Unix()
 		for identity, worker := range d.workers {
@@ -186,6 +192,19 @@ func (d *Dispatcher) removeWorker(identity uint32) {
 	delete(d.workers, identity)
 }
 
+func (d *Dispatcher) removeWorkerTask(identity uint32, taskUUID uuid.UUID) {
+	taskId := TaskId{identity, taskUUID}
+	worker := d.workers[identity]
+
+	for i, task := range worker.tasks {
+		if task == taskId {
+			freshTaskList := []TaskId{}
+			freshTaskList = append(worker.tasks[:i], worker.tasks[i+1:]...)
+			d.workers[identity].tasks = freshTaskList
+		}
+	}
+}
+
 func (d *Dispatcher) releaseWorkerId(id uint8, workerType string) {
 	ids := d.ids[workerType]
 	ids[id-1] = false
@@ -268,6 +287,7 @@ func (d *Dispatcher) processInbound(msg []string) error {
 			//if task.chResult == nil {
 			//	return errors.New("Result channel closed")
 			//}
+			d.removeWorkerTask(identity, taskUUID)
 			go func() { task.chResult <- msg[3] }()
 
 		}
@@ -328,7 +348,7 @@ func (d *Dispatcher) getBestWorker(methodName string) (uint32, error) {
 		}
 	}
 
-	if len(candidates) == 0 || len(candidates) > WorkerMaxTasks {
+	if len(candidates) == 0 || shortest > WorkerMaxTasks {
 		return 0, errors.New("No free workers avaliable")
 	}
 	return candidates[idx], nil
@@ -379,6 +399,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	select {
 	case response := <-chResult:
 		//fmt.Printf("ExecuteMethod got result %s", response)
+		d.removeTasks([]TaskId{taskId})
 		chResponse <- response
 		//fmt.Println("ExecuteMethod write response")
 	case <-time.After(ExecuteTimeout):
