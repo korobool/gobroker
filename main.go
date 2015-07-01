@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -8,12 +9,16 @@ import (
 	"net/http"
 )
 
-const rootPath = "http://localhost:8080"
+var rootPath string
 
 var GrossDispatcher Dispatcher
 var landingTempl *template.Template
 
 func main() {
+	root := flag.String("root", "localhost:8080", "server root")
+	flag.Parse()
+
+	rootPath = fmt.Sprintf("http://%s", *root)
 
 	// TODO: Do it properly (at least call a function load templates...)
 	landingTempl = template.New("valutchik.html")
