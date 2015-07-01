@@ -98,7 +98,7 @@ func (d *Dispatcher) HeartbeatingRun() {
 
 		fmt.Println("==================")
 		for i, w := range d.workers {
-			fmt.Printf(">>>worker: [%d] <%s:%d> >>> %d\n", i, w.workerType, w.workerId, len(w.tasks))
+			fmt.Printf(">>>worker: [%d] <%s:%d>\t%d\n", i, w.workerType, w.workerId, len(w.tasks))
 		}
 		fmt.Println("==================")
 
@@ -337,11 +337,12 @@ func (d *Dispatcher) ZmqLoopRun() error {
 func (d *Dispatcher) getBestWorker(methodName string) (uint32, error) {
 
 	candidates := d.methods[methodName]
-	shortest := ^int(0)
+	shortest := int(^uint(0) >> 1)
 	idx := 0
 
 	// TODO: check for safity and put a Mutex if needed.
 	for index, candidate := range candidates {
+		//fmt.Printf("len: %d shortest: %d idx: %d\n", len(d.workers[candidate].tasks), shortest, idx)
 		if len(d.workers[candidate].tasks) < shortest {
 			shortest = len(d.workers[candidate].tasks)
 			idx = index
