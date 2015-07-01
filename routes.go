@@ -1,9 +1,13 @@
 package main
 
-import "net/http"
+import (
+	"github.com/zenazn/goji"
+	// "github.com/zenazn/goji/web"
+	"fmt"
+	"net/http"
+)
 
 type Route struct {
-	Name        string
 	Method      string
 	Pattern     string
 	HandlerFunc http.HandlerFunc
@@ -13,27 +17,41 @@ type Routes []Route
 
 var routes = Routes{
 	Route{
-		"Dists",
 		"GET",
-		"/apps/{appId}/dists",
+		"/apps/:appId/dists",
 		AppDists,
 	},
 	Route{
-		"Share",
 		"GET",
-		"/apps/{appId}/share",
+		"/apps/:appId/share",
 		AppShare,
 	},
 	Route{
-		"Redirection",
 		"GET",
-		"/{hash}",
+		"/:hash",
 		Redirect,
 	},
 	Route{
-		"Landing",
 		"GET",
-		"/l/{hash}",
+		"/l/:hash",
 		Landing,
 	},
+}
+
+func registerRoutes() {
+
+	for _, route := range routes {
+		var handler http.Handler
+		handler = route.HandlerFunc
+
+		if route.Method == "GET" {
+			goji.Get(route.Pattern, handler)
+		}
+
+		if route.Method == "POST" {
+			goji.Post(route.Pattern, handler)
+		}
+		fmt.Println("Registered", route)
+	}
+
 }

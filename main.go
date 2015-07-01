@@ -1,11 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"github.com/zenazn/goji"
 	"html/template"
 	"io/ioutil"
-	"log"
-	"net/http"
 )
 
 const rootPath = "http://localhost:8080"
@@ -23,17 +23,16 @@ func main() {
 	}
 	landingTempl, _ = landingTempl.Parse(string(templateStr))
 
-	router := NewRouter()
+	flag.Set("bind", ":8080")
+	registerRoutes()
+
 	dispatcher, err := NewDispatcher("tcp://0.0.0.0:7070")
 	if err != nil {
 		fmt.Println(err)
 	}
 	GrossDispatcher = *dispatcher
 
-	// // Starting zeromq loop
-	// go GrossDispatcher.ZmqReadLoopRun()
-	// go GrossDispatcher.ZmqWriteLoopRun()
 	GrossDispatcher.run()
+	goji.Serve()
 
-	log.Fatal(http.ListenAndServe(":8080", router))
 }
