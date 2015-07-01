@@ -134,14 +134,11 @@ func checkAuth(authHeader string) (string, error) {
 	}
 
 	var data struct {
-		//WORKAROUND: recieving customer_id as int from Auth-worker
 		CustomerId string `json:"customer_id"`
 	}
 
 	err = json.Unmarshal([]byte(customerJSON), &data)
 
-	//WORKAROUND: recieving customer_id as int from Auth-worker
-	//customer := strconv.Itoa(data.CustomerId)
 	if data.CustomerId == "" {
 		return "", errors.New("No such API key")
 	}
@@ -150,14 +147,9 @@ func checkAuth(authHeader string) (string, error) {
 }
 
 func checkAppId(appId string, customerId string) error {
-	//WORKAROUND: recieving customer_id as int from Auth-worker
-	//customer, _ := strconv.Atoi(customerId)
-
-	fmt.Println("customerId>>>>>", customerId)
 
 	msg := struct {
 		CustomerId string `json:"customer_id"`
-		//WORKAROUND: recieving customer_id as int from Auth-worker
 	}{customerId}
 
 	params, _ := json.Marshal(msg)
