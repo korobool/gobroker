@@ -287,7 +287,6 @@ func (d *Dispatcher) processInbound(msg []string) error {
 			//if task.chResult == nil {
 			//	return errors.New("Result channel closed")
 			//}
-			d.removeWorkerTask(identity, taskUUID)
 			go func() { task.chResult <- msg[3] }()
 
 		}
@@ -342,7 +341,8 @@ func (d *Dispatcher) getBestWorker(methodName string) (uint32, error) {
 
 	// TODO: check for safity and put a Mutex if needed.
 	for index, candidate := range candidates {
-		//fmt.Printf("len: %d shortest: %d idx: %d\n", len(d.workers[candidate].tasks), shortest, idx)
+		//fmt.Printf("len: %d shortest: %d idx: %d\n",
+		//				len(d.workers[candidate].tasks), shortest, idx)
 		if len(d.workers[candidate].tasks) < shortest {
 			shortest = len(d.workers[candidate].tasks)
 			idx = index
@@ -401,10 +401,12 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 	case response := <-chResult:
 		//fmt.Printf("ExecuteMethod got result %s", response)
 		d.removeTasks([]TaskId{taskId})
+		d.removeWorkerTask(bestWorker, taskUUID)
 		chResponse <- response
 		//fmt.Println("ExecuteMethod write response")
 	case <-time.After(ExecuteTimeout):
 		d.removeTasks([]TaskId{taskId})
+		d.removeWorkerTask(bestWorker, taskUUID)
 		fmt.Println("ExecuteMethod timeout")
 	}
 
