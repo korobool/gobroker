@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gorilla/mux"
+	// "github.com/gorilla/mux"
+	// "github.com/zenazn/goji"
+	"github.com/zenazn/goji/web"
 	"net/http"
 	"strings"
 	"time"
@@ -33,11 +35,11 @@ type StatMessage struct {
 	LinkType string `json:"link_type"`
 }
 
-func Redirect(w http.ResponseWriter, r *http.Request) {
+func Redirect(c web.C, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
-	vars := mux.Vars(r)
-	hash := vars["hash"]
+	hash := c.URLParams["hash"]
+
 	if len(hash) > HashLength { // TODO: add checking for alphanumeric
 		w.WriteHeader(http.StatusForbidden) // TODO: Provide reason message
 		return
@@ -166,7 +168,7 @@ func checkAppId(appId string, customerId string) error {
 	return errors.New("Not permited AppId for this customer")
 }
 
-func AppDists(w http.ResponseWriter, r *http.Request) {
+func AppDists(c web.C, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	customerId, err := checkAuth(r.Header.Get(ApiKeyHeader))
@@ -175,8 +177,7 @@ func AppDists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vars := mux.Vars(r)
-	appId := vars["appId"]
+	appId := c.URLParams["appId"]
 
 	if len(appId) > AppIdLength {
 		w.WriteHeader(http.StatusForbidden)
@@ -203,7 +204,7 @@ func AppDists(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, string(distsJSON))
 }
 
-func AppShare(w http.ResponseWriter, r *http.Request) {
+func AppShare(c web.C, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	customerId, err := checkAuth(r.Header.Get(ApiKeyHeader))
@@ -212,8 +213,8 @@ func AppShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vars := mux.Vars(r)
-	appId := vars["appId"]
+	// vars := c.URLParams
+	appId := c.URLParams["appId"]
 
 	if len(appId) > AppIdLength {
 		w.WriteHeader(http.StatusForbidden)
@@ -297,11 +298,10 @@ func AppShare(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, string(resultJSON))
 }
 
-func Landing(w http.ResponseWriter, r *http.Request) {
+func Landing(c web.C, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
-	vars := mux.Vars(r)
-	hash := vars["hash"]
+	hash := c.URLParams["hash"]
 	if len(hash) > HashLength { // TODO: add checking for alphanumeric
 		w.WriteHeader(http.StatusForbidden) // TODO: Provide reason message
 		return

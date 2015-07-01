@@ -6,6 +6,8 @@ import (
 	"github.com/zenazn/goji"
 	"html/template"
 	"io/ioutil"
+	"log"
+	"net"
 )
 
 var rootPath string
@@ -14,9 +16,19 @@ var GrossDispatcher Dispatcher
 var landingTempl *template.Template
 
 func main() {
+
+	verbose := flag.Bool("verbose", false, "turn the logging on")
+
 	root := flag.String("root", "localhost:8080", "server root")
+	httpBind := flag.String("httpBind", "localhost", "server HTTP bind ddress")
+	httpPort := flag.Int("httpPort", 8080, "server HTTP root")
 	flag.Parse()
 
+	if !*verbose {
+		log.SetOutput(ioutil.Discard)
+	}
+
+	httpListen := fmt.Sprintf("%s:%d", *httpBind, *httpPort)
 	rootPath = fmt.Sprintf("http://%s", *root)
 
 	// TODO: Do it properly (at least call a function load templates...)
@@ -27,16 +39,22 @@ func main() {
 	}
 	landingTempl, _ = landingTempl.Parse(string(templateStr))
 
-	flag.Set("bind", ":8080")
-	registerRoutes()
-
 	dispatcher, err := NewDispatcher("tcp://0.0.0.0:7070")
 	if err != nil {
 		fmt.Println(err)
 	}
 	GrossDispatcher = *dispatcher
 
+	//flag.Set("bind", ":8080")
+	registerRoutes()
+
 	GrossDispatcher.run()
-	goji.Serve()
+
+	listener, err := net.Listen("tcp4", httpListen)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	goji.ServeListener(listener)
 
 }

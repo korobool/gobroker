@@ -1,16 +1,16 @@
 package main
 
 import (
-	"github.com/zenazn/goji"
-	// "github.com/zenazn/goji/web"
 	"fmt"
-	"net/http"
+	"github.com/zenazn/goji"
+	"github.com/zenazn/goji/web"
+	// "net/http"
 )
 
 type Route struct {
 	Method      string
 	Pattern     string
-	HandlerFunc http.HandlerFunc
+	HandlerFunc web.HandlerFunc
 }
 
 type Routes []Route
@@ -41,7 +41,7 @@ var routes = Routes{
 func registerRoutes() {
 
 	for _, route := range routes {
-		var handler http.Handler
+		var handler web.HandlerFunc //http.Handler
 		handler = route.HandlerFunc
 
 		if route.Method == "GET" {
