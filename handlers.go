@@ -16,7 +16,7 @@ const (
 	AppIdLength    = 15
 	DefaultTimeout = time.Second * 1
 	ApiKeyHeader   = "X-API-KEY"
-	DomainHeader   = "X-Host"
+	//DomainHeader   = "X-Host"
 )
 
 type ApiMessage struct {
@@ -263,7 +263,8 @@ func AppShare(w http.ResponseWriter, r *http.Request) {
 	}{
 		customerId,
 		appId,
-		r.Header.Get(DomainHeader),
+		r.Host,
+		//r.Header.Get(DomainHeader),
 		struct {
 			Apple   string `json:"apple"`
 			Android string `json:"android"`
