@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/gorilla/mux"
 	"net/http"
-	//"strconv"
 	"strings"
 	"time"
 )
@@ -16,7 +15,6 @@ const (
 	AppIdLength    = 15
 	DefaultTimeout = time.Second * 1
 	ApiKeyHeader   = "X-API-KEY"
-	//DomainHeader   = "X-Host"
 )
 
 type ApiMessage struct {
@@ -37,6 +35,7 @@ type StatMessage struct {
 
 func Redirect(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+
 	vars := mux.Vars(r)
 	hash := vars["hash"]
 	if len(hash) > HashLength { // TODO: add checking for alphanumeric
@@ -48,24 +47,20 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 		Hash string `json:"hash"`
 	}{hash}
 
-	params, _ := json.Marshal(msg)
-
-	// fmt.Println("params >> ", string(params), params, hash, msg)
-
-	expandJSON, err := GrossDispatcher.RemoteCall(
-		"expand",
-		string(params),
-		DefaultTimeout,
-	)
+	params, err := json.Marshal(msg)
 	if err != nil {
-		fmt.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	expandJSON, err := GrossDispatcher.RemoteCall("expand", params, DefaultTimeout)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusRequestTimeout)
 		return
 	}
 
 	// TODO: validate expandJSON for
-
-	var data struct {
+	var expandData struct {
 		AppId string `json:"app_id"`
 		Urls  struct {
 			Android string `json:"android"`
@@ -73,14 +68,13 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 		} `json:"urls"`
 	}
 
-	err = json.Unmarshal([]byte(expandJSON), &data)
+	err = json.Unmarshal(expandJSON, &expandData)
 	if err != nil {
-		fmt.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if data.AppId == "" {
+	if expandData.AppId == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -88,7 +82,7 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 	platform := getPlatform(r.UserAgent())
 
 	statistics := StatMessage{
-		AppId:    data.AppId,
+		AppId:    expandData.AppId,
 		Link:     r.RequestURI,
 		IP:       strings.Split(r.RemoteAddr, ":")[0],
 		UA:       r.UserAgent(),
@@ -100,16 +94,16 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 
 	params, _ = json.Marshal(statistics)
 
-	_, err = GrossDispatcher.RemoteCall("open_commit", string(params), DefaultTimeout)
+	_, err = GrossDispatcher.RemoteCall("open_commit", params, DefaultTimeout)
 	if err != nil {
 		fmt.Println(err)
 	}
 
 	if platform == PlatformAndroid {
-		url := data.Urls.Android
+		url := expandData.Urls.Android
 		http.Redirect(w, r, url, http.StatusFound)
 	} else if platform == PlatformIPhone {
-		url := data.Urls.Apple
+		url := expandData.Urls.Apple
 		http.Redirect(w, r, url, http.StatusFound)
 	} else {
 		w.WriteHeader(http.StatusForbidden) // TODO: add forbidden page
@@ -124,26 +118,22 @@ func checkAuth(authHeader string) (string, error) {
 
 	params, _ := json.Marshal(msg)
 
-	customerJSON, err := GrossDispatcher.RemoteCall(
-		"get_customer",
-		string(params),
-		DefaultTimeout,
-	)
+	customerJSON, err := GrossDispatcher.RemoteCall("get_customer", params, DefaultTimeout)
 	if err != nil {
 		return "", err
 	}
 
-	var data struct {
+	var resultData struct {
 		CustomerId string `json:"customer_id"`
 	}
 
-	err = json.Unmarshal([]byte(customerJSON), &data)
+	err = json.Unmarshal(customerJSON, &resultData)
 
-	if data.CustomerId == "" {
+	if resultData.CustomerId == "" {
 		return "", errors.New("No such API key")
 	}
 
-	return data.CustomerId, nil
+	return resultData.CustomerId, nil
 }
 
 func checkAppId(appId string, customerId string) error {
@@ -154,23 +144,22 @@ func checkAppId(appId string, customerId string) error {
 
 	params, _ := json.Marshal(msg)
 
-	appsJSON, err := GrossDispatcher.RemoteCall(
-		"get_customer_apps",
-		string(params),
-		DefaultTimeout,
-	)
-
-	var data struct {
-		Apps []string `json:"apps"`
-	}
-
-	err = json.Unmarshal([]byte(appsJSON), &data)
+	appsJSON, err := GrossDispatcher.RemoteCall("get_customer_apps", params, DefaultTimeout)
 	if err != nil {
 		return err
 	}
 
-	for _, value := range data.Apps {
-		if value == appId {
+	var dataResult struct {
+		Apps []string `json:"apps"`
+	}
+
+	err = json.Unmarshal(appsJSON, &dataResult)
+	if err != nil {
+		return err
+	}
+
+	for _, app := range dataResult.Apps {
+		if app == appId {
 			return nil
 		}
 	}
@@ -200,17 +189,18 @@ func AppDists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//params := fmt.Sprintf("{\"app_id\": \"%s\"}", appId)
 	msg := struct {
 		AppId string `json:"app_id"`
 	}{appId}
 
 	params, _ := json.Marshal(msg)
 
-	// TODO: RemoteCall err returning wasn't checked
-	distsJSON, _ := GrossDispatcher.RemoteCall("get_app_dists", string(params), DefaultTimeout)
-
-	fmt.Fprintf(w, distsJSON)
+	distsJSON, err := GrossDispatcher.RemoteCall("get_app_dists", params, DefaultTimeout)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
+		return
+	}
+	fmt.Fprintf(w, string(distsJSON))
 }
 
 func AppShare(w http.ResponseWriter, r *http.Request) {
@@ -242,17 +232,24 @@ func AppShare(w http.ResponseWriter, r *http.Request) {
 
 	params, _ := json.Marshal(msg)
 
-	infoJSON, _ := GrossDispatcher.RemoteCall("get_app_info", string(params), DefaultTimeout)
+	infoJSON, err := GrossDispatcher.RemoteCall("get_app_info", params, DefaultTimeout)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
+		return
+	}
 
-	type InfoResult struct {
+	var infoResult struct {
 		UrlApple   string `json:"url_apple"`
 		UrlAndroid string `json:"url_android"`
 	}
-	var infoResult InfoResult
 
-	err = json.Unmarshal([]byte(infoJSON), &infoResult)
+	err = json.Unmarshal(infoJSON, &infoResult)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	data := struct {
+	shortenData := struct {
 		CustomerId string `json:"customer_id"`
 		AppId      string `json:"app_id"`
 		Domain     string `json:"domain"`
@@ -264,29 +261,36 @@ func AppShare(w http.ResponseWriter, r *http.Request) {
 		customerId,
 		appId,
 		r.Host,
-		//r.Header.Get(DomainHeader),
 		struct {
 			Apple   string `json:"apple"`
 			Android string `json:"android"`
 		}{infoResult.UrlApple, infoResult.UrlAndroid},
 	}
 
-	params, _ = json.Marshal(data)
+	params, _ = json.Marshal(shortenData)
 
-	shortenJSON, _ := GrossDispatcher.RemoteCall("shorten", string(params), DefaultTimeout)
+	shortenJSON, err := GrossDispatcher.RemoteCall("shorten", params, DefaultTimeout)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
+		return
+	}
 
-	var shortenData struct {
+	var hashData struct {
 		Hash string `json:"hash"`
 	}
 
-	err = json.Unmarshal([]byte(shortenJSON), &shortenData)
+	err = json.Unmarshal(shortenJSON, &hashData)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	resultData := struct {
 		Redirect string `json:"redirect"`
 		Landing  string `json:"landing"`
 	}{
-		fmt.Sprintf("%s/%s", rootPath, shortenData.Hash),
-		fmt.Sprintf("%s/l/%s", rootPath, shortenData.Hash),
+		fmt.Sprintf("%s/%s", rootPath, hashData.Hash),
+		fmt.Sprintf("%s/l/%s", rootPath, hashData.Hash),
 	}
 	resultJSON, _ := json.Marshal(resultData)
 
@@ -307,19 +311,20 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 		Hash string `json:"hash"`
 	}{hash}
 
-	params, _ := json.Marshal(msg)
+	params, err := json.Marshal(msg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	// fmt.Println("params >> ", string(params), params, hash, msg)
-
-	expandJson, err := GrossDispatcher.RemoteCall(
-		"expand",
-		string(params),
-		DefaultTimeout,
-	)
+	expandJson, err := GrossDispatcher.RemoteCall("expand", params, DefaultTimeout)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
+		return
+	}
 
 	// TODO: validate expandJson for
-
-	var data struct {
+	var expandData struct {
 		AppId string `json:"app_id"`
 		Urls  struct {
 			Android string `json:"android"`
@@ -327,14 +332,13 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 		} `json:"urls"`
 	}
 
-	err = json.Unmarshal([]byte(expandJson), &data)
-
+	err = json.Unmarshal(expandJson, &expandData)
 	if err != nil {
-		fmt.Println("REMOTE CALL TIMEOUT")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	if data.AppId == "" {
-		// w.WriteHeader(http.NotFound(w, r)) // TODO: add "not found" page
+	if expandData.AppId == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -344,11 +348,15 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 
 	landingMsg := struct {
 		AppId string `json:"app_id"`
-	}{data.AppId}
+	}{expandData.AppId}
 
 	landingParams, _ := json.Marshal(landingMsg)
 
-	landigJSON, err := GrossDispatcher.RemoteCall("get_app_landing", string(landingParams), DefaultTimeout)
+	landigJSON, err := GrossDispatcher.RemoteCall("get_app_landing", landingParams, DefaultTimeout)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusRequestTimeout)
+		return
+	}
 
 	var landingResult struct {
 		MetaApple   string `json:"meta_apple"`
@@ -356,7 +364,7 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 		Template    string `json:"template"`
 	}
 
-	err = json.Unmarshal([]byte(landigJSON), &landingResult)
+	err = json.Unmarshal(landigJSON, &landingResult)
 
 	platform := getPlatform(r.UserAgent())
 
@@ -369,19 +377,19 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 
 	if platform == PlatformAndroid {
 
-		err = json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
+		json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
 
 		context.Meta = meta
 		context.Image = meta["image"]
 
 	} else if platform == PlatformIPhone {
-		err = json.Unmarshal([]byte(landingResult.MetaApple), &meta)
+		json.Unmarshal([]byte(landingResult.MetaApple), &meta)
 
 		context.Meta = meta
 		context.Image = meta["image"]
 
 	} else {
-		err = json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
+		json.Unmarshal([]byte(landingResult.MetaAndroid), &meta)
 
 		context.Meta = nil
 		context.Image = meta["image"]
@@ -393,7 +401,7 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	statistics := StatMessage{
-		AppId:    data.AppId,
+		AppId:    expandData.AppId,
 		Link:     r.RequestURI,
 		IP:       strings.Split(r.RemoteAddr, ":")[0],
 		UA:       r.UserAgent(),
@@ -405,5 +413,9 @@ func Landing(w http.ResponseWriter, r *http.Request) {
 
 	params, _ = json.Marshal(statistics)
 
-	GrossDispatcher.RemoteCall("open_commit", string(params), DefaultTimeout)
+	_, err = GrossDispatcher.RemoteCall("open_commit", params, DefaultTimeout)
+	if err != nil {
+		fmt.Println(err)
+	}
+
 }

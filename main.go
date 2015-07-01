@@ -35,9 +35,6 @@ func main() {
 	}
 	GrossDispatcher = *dispatcher
 
-	// // Starting zeromq loop
-	// go GrossDispatcher.ZmqReadLoopRun()
-	// go GrossDispatcher.ZmqWriteLoopRun()
 	GrossDispatcher.run()
 
 	log.Fatal(http.ListenAndServe(":8080", router))

@@ -412,7 +412,7 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 
 }
 
-func (d *Dispatcher) RemoteCall(methodName string, params string, timeout time.Duration) (string, error) {
+func (d *Dispatcher) RemoteCall(methodName string, params []byte, timeout time.Duration) ([]byte, error) {
 
 	var err error = nil
 
@@ -420,7 +420,7 @@ func (d *Dispatcher) RemoteCall(methodName string, params string, timeout time.D
 
 	apiMsg := ApiMessage{
 		method: methodName,
-		params: params,
+		params: string(params),
 	}
 
 	go GrossDispatcher.ExecuteMethod(&apiMsg, chResult)
@@ -430,11 +430,11 @@ func (d *Dispatcher) RemoteCall(methodName string, params string, timeout time.D
 		if !ok {
 			err = errors.New("Chanel closed")
 		}
-		return result, err
+		return []byte(result), err
 
 	case <-time.After(timeout):
 		err = errors.New("RemoteCall timeout reached.")
-		return "", err
+		return []byte{}, err
 	}
 
 }
