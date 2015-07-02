@@ -2,15 +2,17 @@ package main
 
 import (
 	"fmt"
-	"github.com/zenazn/goji"
-	"github.com/zenazn/goji/web"
+	"github.com/julienschmidt/httprouter"
+	// "github.com/zenazn/goji"
+	// "github.com/zenazn/goji/web"
+
 	// "net/http"
 )
 
 type Route struct {
 	Method      string
 	Pattern     string
-	HandlerFunc web.HandlerFunc
+	HandlerFunc httprouter.Handle
 }
 
 type Routes []Route
@@ -28,30 +30,32 @@ var routes = Routes{
 	},
 	Route{
 		"GET",
-		"/:hash",
-		Redirect,
-	},
-	Route{
-		"GET",
 		"/l/:hash",
 		Landing,
 	},
+	// Route{
+	// 	"GET",
+	// 	"/:hash",
+	// 	Redirect,
+	// },
 }
 
-func registerRoutes() {
+func registerRoutes() *httprouter.Router {
+	router := httprouter.New()
 
 	for _, route := range routes {
-		var handler web.HandlerFunc //http.Handler
+		var handler httprouter.Handle //http.Handler
 		handler = route.HandlerFunc
 
 		if route.Method == "GET" {
-			goji.Get(route.Pattern, handler)
+			router.GET(route.Pattern, handler)
 		}
 
 		if route.Method == "POST" {
-			goji.Post(route.Pattern, handler)
+			router.POST(route.Pattern, handler)
 		}
 		fmt.Println("Registered", route)
 	}
+	return router
 
 }

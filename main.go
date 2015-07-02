@@ -3,11 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/zenazn/goji"
+	// "github.com/zenazn/goji"
 	"html/template"
 	"io/ioutil"
 	"log"
-	"net"
+	"net/http"
 )
 
 var rootPath string
@@ -45,16 +45,9 @@ func main() {
 	}
 	GrossDispatcher = *dispatcher
 
-	//flag.Set("bind", ":8080")
-	registerRoutes()
+	router := registerRoutes()
 
 	GrossDispatcher.run()
 
-	listener, err := net.Listen("tcp4", httpListen)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	goji.ServeListener(listener)
-
+	http.ListenAndServe(httpListen, router)
 }

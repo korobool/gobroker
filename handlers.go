@@ -6,7 +6,8 @@ import (
 	"fmt"
 	// "github.com/gorilla/mux"
 	// "github.com/zenazn/goji"
-	"github.com/zenazn/goji/web"
+	"github.com/julienschmidt/httprouter"
+	// "github.com/zenazn/goji/web"
 	"net/http"
 	"strings"
 	"time"
@@ -35,10 +36,11 @@ type StatMessage struct {
 	LinkType string `json:"link_type"`
 }
 
-func Redirect(c web.C, w http.ResponseWriter, r *http.Request) {
+func Redirect(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
-	hash := c.URLParams["hash"]
+	// hash := c.URLParams["hash"]
+	hash := ps.ByName("hash")
 
 	if len(hash) > HashLength { // TODO: add checking for alphanumeric
 		w.WriteHeader(http.StatusForbidden) // TODO: Provide reason message
@@ -168,7 +170,7 @@ func checkAppId(appId string, customerId string) error {
 	return errors.New("Not permited AppId for this customer")
 }
 
-func AppDists(c web.C, w http.ResponseWriter, r *http.Request) {
+func AppDists(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	customerId, err := checkAuth(r.Header.Get(ApiKeyHeader))
@@ -177,7 +179,8 @@ func AppDists(c web.C, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appId := c.URLParams["appId"]
+	// appId := c.URLParams["appId"]
+	appId := ps.ByName("appId")
 
 	if len(appId) > AppIdLength {
 		w.WriteHeader(http.StatusForbidden)
@@ -204,7 +207,7 @@ func AppDists(c web.C, w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, string(distsJSON))
 }
 
-func AppShare(c web.C, w http.ResponseWriter, r *http.Request) {
+func AppShare(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	customerId, err := checkAuth(r.Header.Get(ApiKeyHeader))
@@ -214,7 +217,7 @@ func AppShare(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// vars := c.URLParams
-	appId := c.URLParams["appId"]
+	appId := ps.ByName("appId")
 
 	if len(appId) > AppIdLength {
 		w.WriteHeader(http.StatusForbidden)
@@ -298,10 +301,12 @@ func AppShare(c web.C, w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, string(resultJSON))
 }
 
-func Landing(c web.C, w http.ResponseWriter, r *http.Request) {
+func Landing(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
-	hash := c.URLParams["hash"]
+	// hash := c.URLParams["hash"]
+
+	hash := ps.ByName("hash")
 	if len(hash) > HashLength { // TODO: add checking for alphanumeric
 		w.WriteHeader(http.StatusForbidden) // TODO: Provide reason message
 		return
