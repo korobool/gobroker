@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/korobool/gomixer/proto"
 	"github.com/m4rw3r/uuid"
 	zmq "github.com/pebbe/zmq4"
 	"sync"
@@ -13,12 +14,12 @@ import (
 const (
 	OutBufferSize        = 10
 	MaxWorkers           = 16
-	PollInterval         = 100 * time.Microsecond
 	AliveTimeout         = 2
 	MaxKAFailed          = 2
 	HeartbeatingInterval = 1 * time.Second
 	WorkerMaxTasks       = 200
 	ExecuteTimeout       = 2 * time.Second
+	PollInterval         = 500 * time.Millisecond
 )
 
 type WorkerInfo struct {
@@ -46,48 +47,70 @@ type Locks struct {
 }
 
 type Dispatcher struct {
-	zmqSocket *zmq.Socket
-	zmqPoller *zmq.Poller
-	locks     Locks
+	zmqPullSocket *zmq.Socket
+	zmqPullPoller *zmq.Poller
+	zmqPushSocket *zmq.Socket
+	zmqPushPoller *zmq.Poller
+	locks         Locks
 	//TODO: synchronize this map
 	//use this datastructure https://github.com/streamrail/concurrent-map
-	tasks        map[TaskId]*Task
-	outboundMsgs chan []string
-	workers      map[uint32]*WorkerInfo
-	methods      map[string][]uint32
-	ids          map[string][MaxWorkers]bool
+	tasks       map[TaskId]*Task
+	pullOutMsgs chan []string
+	pushOutMsgs chan []string
+	workers     map[uint32]*WorkerInfo
+	methods     map[string][]uint32
+	ids         map[string][MaxWorkers]bool
+	accepts     map[uint32]chan struct{}
 }
 
-func NewDispatcher(uri string) (*Dispatcher, error) {
+func createZmqSocket(uri string) (*zmq.Socket, *zmq.Poller, error) {
 
 	zmqSocket, err := zmq.NewSocket(zmq.ROUTER)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := zmqPullSocket.Bind(uri); err != nil {
+		return nil, nil, err
+	}
+	zmqPoller := zmq.NewPoller()
+	zmqPoller.Add(zmqSocket, zmq.POLLIN)
+
+	return zmqSocket, zmqPoller, nil
+
+}
+
+func NewDispatcher(uriPull string, uriPush string) (*Dispatcher, error) {
+
+	zmqPullSocket, zmqPullPoller, err := createZmqSocket(uriPull)
+	if err != nil {
+		return nil, err
+	}
+	zmqPushSocket, zmqPushPoller, err := createZmqSocket(uriPush)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := zmqSocket.Bind(uri); err != nil {
-		return nil, err
-	}
-
-	zmqPoller := zmq.NewPoller()
-	zmqPoller.Add(zmqSocket, zmq.POLLIN)
-
 	return &Dispatcher{
-		zmqSocket:    zmqSocket,
-		zmqPoller:    zmqPoller,
-		locks:        Locks{workers: new(sync.RWMutex), tasks: new(sync.Mutex)},
-		tasks:        make(map[TaskId]*Task),
-		outboundMsgs: make(chan []string, OutBufferSize),
-		//outboundMsgs: make(chan []string),
+		zmqPullSocket: zmqPullSocket,
+		zmqPullPoller: zmqPullPoller,
+		zmqPushSocket: zmqPushSocket,
+		zmqPushPoller: zmqPushPoller,
+		locks:         Locks{workers: new(sync.RWMutex), tasks: new(sync.Mutex)},
+		tasks:         make(map[TaskId]*Task),
+		pullOutMsgs:   make(chan []string),
+		pushOutMsgs:   make(chan []string),
+		//pullOutMsgs:   make(chan []string, OutBufferSize),
+		//pushOutMsgs:   make(chan []string, OutBufferSize),
 		workers: make(map[uint32]*WorkerInfo),
 		methods: make(map[string][]uint32),
 		ids:     map[string][MaxWorkers]bool{},
+		accepts: make(map[uint32]chan struct{}),
 	}, err
 }
 
 func (d *Dispatcher) run() {
-	// Starting zeromq loop
-	go d.ZmqLoopRun()
+	go d.ZmqPushLoopRun()
+	go d.ZmqPullLoopRun()
 	go d.HeartbeatingRun()
 }
 
@@ -114,9 +137,9 @@ func (d *Dispatcher) HeartbeatingRun() {
 			}
 			strIdentity := identityIntToString(identity)
 
-			kaMsg := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", worker.workerId)}
+			kaMsg := []string{strIdentity, proto.KA, fmt.Sprintf("%d", worker.workerId)}
 
-			go d.sendToOutbound(kaMsg, DefaultTimeout)
+			go d.sendToPush(kaMsg, DefaultTimeout)
 
 		}
 		for _, id := range removeList {
@@ -231,105 +254,215 @@ func (d *Dispatcher) takeWorkerId(workerType string) (uint8, error) {
 	return 0, errors.New("No free woker id")
 }
 
-func (d *Dispatcher) sendToOutbound(msg []string, timeout time.Duration) {
+func (d *Dispatcher) sendToPush(msg []string, timeout time.Duration) {
 	select {
-	case d.outboundMsgs <- msg:
-	case <-time.After(timeout):
+	case d.pullOutMsgs <- msg:
+	case <-time.after(timeout):
 	}
 }
 
-func (d *Dispatcher) processInbound(msg []string) error {
+func (d *Dispatcher) sendToPull(msg []string, timeout time.Duration) {
+	select {
+	case d.pullOutMsgs <- msg:
+	case <-time.after(timeout):
+	}
+}
 
-	// Ugly 4 bytes to int32 conversion (msg[0][1:] has length 4)
-	identity := binary.LittleEndian.Uint32([]byte(msg[0][1:]))
+func (d *Dispatcher) registerInMethods(identity uint32, exposedMethods []string) {
+
+	for idx := range exposedMethods {
+		method := exposedMethods[idx]
+		if _, ok := d.methods[method]; ok {
+			d.methods[method] = append(d.methods[method], identity)
+		} else {
+			d.methods[method] = []uint32{identity}
+		}
+	}
+}
+
+func (d *Dispatcher) attachWorker(identity, msg []string, timeout time.Duration) {
+
+	workerType := msg[2]
+
+	workerId, err := d.takeWorkerId(workerType)
+	if err != nil {
+		fmt.Println("failed to attach new worker: no free workerId")
+		return
+	}
+
+	strIdentity := identityIntToString(identity)
+	acceptMsg := []string{strIdentity, proto.ACCEPT, fmt.Sprintf("%d", workerId)}
+
+	chAccept := make(chan struct{})
+
+	d.accepts[identity] = chAccept
+
+	go sendToPull(acceptMsg, timeout)
+
+	select {
+	case <-chAccept:
+	case <-time.after(timeout):
+		d.releaseWorkerId(workerId)
+		return
+	}
+
+	worker = &WorkerInfo{
+		workerId:   workerId,
+		workerType: workerType,
+		tasks:      []TaskId{},
+		kaLast:     0,
+		kaFailed:   0,
+	}
+
+	//WARN: remove locks in removeWorker()!!!!
+	d.locks.workers.Lock()
+	if _, ok := d.workers[identity]; ok {
+		d.removeWorker(identity)
+	}
+	d.workers[identity] = worker
+	// Register methods exposed by a worker
+	d.registerInMethods(msg[3:])
+	d.locks.workers.Unlock()
+}
+
+func (d *Dispatcher) recvPull(msg []string) error {
+
+	// 4 bytes to int32 conversion (msg[0][1:] has length 4)
+	identity := identityByteStrToInt(msg[0][1:])
 
 	//fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
 
 	cmd := msg[1]
-	if cmd == PROTO_READY {
-		if _, ok := d.workers[identity]; ok {
-			d.removeWorker(identity)
-		}
-		err := d.addWorker(identity, msg)
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
+	if cmd == proto.READYPUSH {
+		go d.attachWorker(identity, DefaultTimeout)
 
-		strIdentity := identityIntToString(identity)
-
-		firstValuebleKA := []string{strIdentity, PROTO_KA, fmt.Sprintf("%d", d.workers[identity].workerId)}
-
-		go d.sendToOutbound(firstValuebleKA, DefaultTimeout)
 	}
-
-	// TODO: We need to ignore all the messages from workers with unnkown identity
+	// Ignore all the messages with unknown identity
 	if _, ok := d.workers[identity]; !ok {
 		fmt.Println("Unknown identity: ", identity)
 		return nil
 	}
 
-	if msg[1] == PROTO_KA {
-		d.workers[identity].kaLast = time.Now().Unix()
-		d.workers[identity].kaFailed = 0
-	}
-	if msg[1] == PROTO_DONE {
+	if msg[1] == proto.DONE {
+
 		if len(msg) < 3 {
 			return errors.New("Malformed message")
 		}
+
 		taskUUID, err := uuid.FromString(msg[2])
 		if err != nil {
 			return errors.New("Wrong UUID in message")
 		}
 
-		//d.locks.tasks.Lock()
 		if task, ok := d.tasks[TaskId{identity, taskUUID}]; ok {
-			//if task.chResult == nil {
-			//	return errors.New("Result channel closed")
-			//}
+			// TODO: check if channel closed
 			go func() { task.chResult <- msg[3] }()
-
 		}
-		//d.locks.tasks.Unlock()
 	}
 	return nil
 }
 
-func (d *Dispatcher) ZmqLoopRun() error {
+func (d *Dispatcher) recvPush(msg []string) error {
 
-	for _ = range time.Tick(PollInterval) {
-		//select {
-		//case msg := <-d.outboundMsgs:
-		//	d.zmqSocket.SendMessage(msg)
-		//default:
-		//}
+	// 4 bytes to int32 conversion (msg[0][1:] has length 4)
+	identity := identityByteStrToInt(msg[0][1:])
 
-		for exitSelect := false; !exitSelect; {
+	//fmt.Printf("[id:%d] recieved: %q\n", identity, msg)
+
+	cmd := msg[1]
+	if cmd == proto.READYPULL {
+		if chAccept, ok := d.accepts[identity]; ok {
+			go func() { chAccept <- struct{}{} }()
+		}
+	}
+	return nil
+}
+
+func sendFromChannel(chMsg chan []string, socket *zmq.Socket, stop chan struct{}) {
+	for {
+		select {
+		case msg := <-chMsg:
+			socket.SendMessage(msg)
+		case <-stop:
+			return
+		}
+	}
+}
+
+func (d *Dispatcher) ZmqPushLoopRun() error {
+
+	chStop := make(chan struct{})
+
+	for {
+
+		go sendFromChannel(d.pushOutMsgs, d.zmqPushSocket, chStop)
+
+		<-time.Tick(PollInterval)
+		chStop <- struct{}{}
+
+		// Replce hardcoded value with some reasonable iteration number
+		for i := 0; i < 20; i++ {
+			sockets, err := d.zmqPushPoller.Poll(0)
+			if err != nil {
+				fmt.Println(err)
+				return err //  Interrupt loop
+			}
+
+			if len(sockets) != 1 {
+				break
+			}
+
+			msg, err := d.zmqPushSocket.RecvMessage(zmq.DONTWAIT)
+			if err != nil {
+				fmt.Println(err)
+				break
+			} else {
+				go d.recvPush(msg)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (d *Dispatcher) ZmqPullLoopRun() error {
+
+	chStop := make(chan struct{})
+
+	for {
+
+		for {
 			select {
-			case msg := <-d.outboundMsgs:
-				d.zmqSocket.SendMessage(msg)
+			case <-time.After(PollInterval):
+				break
 			default:
-				exitSelect = true
+				sockets, err := d.zmqPushPoller.Poll(PollInterval)
+				if err != nil {
+					fmt.Println(err)
+					return err //  Interrupt loop
+				}
+
+				if len(sockets) != 1 {
+					break
+				}
+				msg, err := d.zmqPullSocket.RecvMessage(zmq.DONTWAIT)
+				if err != nil {
+					fmt.Println(err)
+				} else {
+					go d.recvPull(msg)
+				}
 			}
 		}
 
-		sockets, err := d.zmqPoller.Poll(0)
-		if err != nil {
-			fmt.Println(err)
-			return err //  Interrupted
-		}
-		if len(sockets) != 1 {
-			continue
-		}
-
-		msg, err := d.zmqSocket.RecvMessage(zmq.DONTWAIT)
-		d.processInbound(msg)
-
-		if err != nil {
-			fmt.Println(">>> ZmqLoop: RecvMessage FAILED!")
-			return err
+		for i := 0; i < 20; i++ {
+			select {
+			case outMsg := <-d.pullOutMsgs:
+				d.zmqPullSocket.SendMessage(msg)
+			default:
+			}
 		}
 	}
+
 	return nil
 }
 
@@ -388,12 +521,12 @@ func (d *Dispatcher) ExecuteMethod(msg *ApiMessage, chResponse chan string) {
 
 	taskMsg := []string{
 		strIdentity,
-		PROTO_TASK,
+		proto.TASK,
 		taskUUID.String(),
 		msg.method,
 		msg.params,
 	}
-	go d.sendToOutbound(taskMsg, ExecuteTimeout)
+	go d.sendToPush(taskMsg, ExecuteTimeout)
 
 	// setup cahanel listener for response with timeout
 	// TODO: Check chanels for existance etc.

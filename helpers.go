@@ -21,6 +21,10 @@ func identityIntToString(identity uint32) string {
 	return string(buf.Bytes())
 }
 
+func identityByteStrToInt(identity string) uint32 {
+	return binary.LittleEndian.Uint32([]byte(identity))
+}
+
 func getPlatform(uaHeader string) string {
 
 	if strings.Contains(strings.ToLower(uaHeader), "iphone") {
